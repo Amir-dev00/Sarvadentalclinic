@@ -224,6 +224,7 @@ $router->post('/admin/sms/templates/save', static function (): void {
     $name = trim((string) ($_POST['name'] ?? ''));
     $slug = trim((string) ($_POST['slug'] ?? '')) ?: admin_slug($name, 'sms');
     $body = trim((string) ($_POST['body'] ?? ''));
+    $body = SmsTemplateRenderer::normalizeToCanonical($body);
     $type = (string) ($_POST['type'] ?? 'custom');
     $category = (string) ($_POST['category'] ?? 'general');
     $active = isset($_POST['is_active']) ? 1 : 0;
@@ -298,7 +299,7 @@ $router->post('/admin/sms/templates/action', static function (): void {
             flash('error', 'شماره یا قالب نامعتبر است.');
             redirect('/admin/sms/templates');
         }
-        $msg = SmsTemplateRenderer::render((string) $tpl['body'], [
+        $rendered = SmsTemplateRenderer::renderForSend((string) $tpl['body'], [
             'full_name' => 'بیمار آزمایشی',
             'first_name' => 'آزمایش',
             'last_name' => 'سروا',
@@ -310,6 +311,16 @@ $router->post('/admin/sms/templates/action', static function (): void {
             'clinic_name' => (string) setting('clinic_name', 'کلینیک سروا'),
             'clinic_phone' => (string) setting('phone', ''),
         ]);
+        if (!$rendered['ok']) {
+            SmsTemplateRenderer::logRenderError('template_test', [
+                'template_id' => $id,
+                'template_slug' => (string) ($tpl['slug'] ?? ''),
+                'unresolved' => $rendered['unresolved'],
+            ]);
+            flash('error', 'قالب دارای متغیرهای حل‌نشده است: ' . implode(', ', $rendered['unresolved']));
+            redirect('/admin/sms/templates');
+        }
+        $msg = $rendered['message'];
         (new SmsService(db()))->enqueue([
             'template_id' => $id,
             'admin_user_id' => Auth::adminId(),

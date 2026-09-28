@@ -244,14 +244,27 @@ final class SmsAutomationService
         $type = 'appointment_reminder';
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $key = 'auto:' . (int) $rule['id'] . ':' . (int) $row['id'] . ':' . $type;
-            $message = SmsTemplateRenderer::render((string) $rule['template_body'], SmsTemplateRenderer::varsFrom($row, $row));
+            $rendered = SmsTemplateRenderer::renderForSend(
+                (string) $rule['template_body'],
+                SmsTemplateRenderer::varsFrom($row, $row)
+            );
+            if (!$rendered['ok']) {
+                SmsTemplateRenderer::logRenderError('automation_enqueue', [
+                    'template_id' => (int) $rule['template_id'],
+                    'template_slug' => (string) ($rule['template_slug'] ?? ''),
+                    'automation_rule_id' => (int) $rule['id'],
+                    'appointment_id' => (int) $row['id'],
+                    'unresolved' => $rendered['unresolved'],
+                ]);
+                continue;
+            }
             $id = $this->sms->enqueue([
                 'patient_id' => (int) $row['patient_id'],
                 'appointment_id' => (int) $row['id'],
                 'template_id' => (int) $rule['template_id'],
                 'automation_rule_id' => (int) $rule['id'],
                 'mobile' => (string) $row['mobile'],
-                'message' => $message,
+                'message' => $rendered['message'],
                 'message_type' => $type,
                 'source' => 'automation',
                 'idempotency_key' => $key,
@@ -281,7 +294,7 @@ final class SmsAutomationService
         } else {
             $send = $sampleAppt->modify("-{$offset} hours");
         }
-        $body = (string) ($template['body'] ?? 'سلام {full_name}\nیادآوری نوبت: {appointment_time}');
+        $body = (string) ($template['body'] ?? "سلام #full_name#\nیادآوری نوبت: #appointment_time#");
         $preview = SmsTemplateRenderer::render($body, [
             'full_name' => 'علی رضایی',
             'first_name' => 'علی',

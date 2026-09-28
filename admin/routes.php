@@ -167,6 +167,10 @@ foreach ($adminCrud as $path => [$perm, $viewName, $title]) {
                 'patients' => db()->query('SELECT * FROM patients WHERE deleted_at IS NULL ORDER BY id DESC LIMIT 100')->fetchAll(),
                 'appointments' => (static function () {
                     $pid = (int) ($_GET['patient_id'] ?? 0);
+                    $date = trim((string) ($_GET['date'] ?? ''));
+                    if ($date !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+                        $date = '';
+                    }
                     $sql = "SELECT a.*, CONCAT(p.first_name,' ',p.last_name) patient_name, s.name service_name,
                             CONCAT(d.first_name,' ',d.last_name) doctor_name
                      FROM appointments a
@@ -179,7 +183,11 @@ foreach ($adminCrud as $path => [$perm, $viewName, $title]) {
                         $sql .= ' AND a.patient_id=?';
                         $params[] = $pid;
                     }
-                    $sql .= ' ORDER BY a.starts_at DESC LIMIT 100';
+                    if ($date !== '') {
+                        $sql .= ' AND DATE(a.starts_at)=?';
+                        $params[] = $date;
+                    }
+                    $sql .= ' ORDER BY a.starts_at DESC LIMIT 200';
                     $st = db()->prepare($sql);
                     $st->execute($params);
                     return $st->fetchAll();
@@ -228,8 +236,13 @@ foreach ($adminCrud as $path => [$perm, $viewName, $title]) {
             }
             if ($viewName === 'appointments') {
                 $selectedPatientId = (int) ($_GET['patient_id'] ?? 0);
+                $filterDate = trim((string) ($_GET['date'] ?? ''));
+                if ($filterDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $filterDate)) {
+                    $filterDate = '';
+                }
                 $data['selected_patient_id'] = $selectedPatientId;
                 $data['selected_patient'] = null;
+                $data['filter_date'] = $filterDate;
                 $data['doctors'] = db()->query(
                     "SELECT id, first_name, last_name FROM doctors WHERE deleted_at IS NULL AND is_active=1 ORDER BY sort_order, id"
                 )->fetchAll();
@@ -248,6 +261,10 @@ foreach ($adminCrud as $path => [$perm, $viewName, $title]) {
                         $selectedPatientId = 0;
                     }
                 }
+                $apptSvc = new AppointmentService(db());
+                $apptSvc->ensureCancelSchema();
+                $data['day_cancellable_count'] = $filterDate !== '' ? $apptSvc->countEligibleForDay($filterDate) : 0;
+                $data['cancellable_statuses'] = AppointmentService::cancellableStatuses();
                 $data['slots_url'] = url('/api/appointment/slots');
                 $data['patient_search_url'] = url('/admin/patients/api/quick-search');
             }
@@ -747,6 +764,24 @@ $router->post('/admin/appointments/status', static function (): void {
         flash('error', 'وضعیت نامعتبر');
         redirect('/admin/appointments');
     }
+
+    // Dedicated cancel path with SMS + idempotency when status=cancelled
+    if ($status === 'cancelled') {
+        $result = (new AppointmentService(db()))->cancelAppointment(
+            $id,
+            (int) Auth::adminId(),
+            null,
+            false // status dropdown: change only, no auto SMS (use لغو نوبت for SMS)
+        );
+        if (!($result['ok'] ?? false) && ($result['status'] ?? '') !== 'already_cancelled') {
+            flash('error', $result['message'] ?? 'لغو نوبت ناموفق بود.');
+        } else {
+            audit('appointment.cancel', 'appointments', $id, ['via' => 'status_dropdown', 'sms' => false]);
+            flash('success', $result['message'] ?? 'وضعیت نوبت به‌روز شد.');
+        }
+        redirect('/admin/appointments');
+    }
+
     $cur = db()->prepare('SELECT status FROM appointments WHERE id=? AND deleted_at IS NULL');
     $cur->execute([$id]);
     $from = $cur->fetchColumn();
@@ -763,6 +798,122 @@ $router->post('/admin/appointments/status', static function (): void {
     audit('appointment.status', 'appointments', $id, ['to' => $status]);
     flash('success', 'وضعیت نوبت به‌روز شد.');
     redirect('/admin/appointments');
+});
+
+$router->post('/admin/appointments/cancel', static function (): void {
+    Auth::requireAdmin('appointments.manage');
+    Csrf::assertValid();
+    $id = (int) ($_POST['id'] ?? 0);
+    $reason = trim((string) ($_POST['reason'] ?? ''));
+    $sendSms = isset($_POST['send_sms']) && (string) $_POST['send_sms'] !== '0';
+    $redirectTo = appointments_cancel_redirect();
+
+    $result = (new AppointmentService(db()))->cancelAppointment(
+        $id,
+        (int) Auth::adminId(),
+        $reason !== '' ? $reason : null,
+        $sendSms
+    );
+
+    audit('appointment.cancel', 'appointments', $id, [
+        'status' => $result['status'] ?? null,
+        'send_sms' => $sendSms,
+        'sms_queued' => $result['sms_queued'] ?? false,
+    ]);
+
+    if (!($result['ok'] ?? false) && ($result['status'] ?? '') !== 'already_cancelled') {
+        flash('error', $result['message'] ?? 'لغو نوبت ناموفق بود.');
+        redirect($redirectTo);
+    }
+
+    $msg = 'نوبت با موفقیت لغو شد.';
+    if (($result['status'] ?? '') === 'already_cancelled') {
+        $msg = 'این نوبت قبلاً لغو شده بود.';
+    } elseif (!$sendSms) {
+        $msg = 'نوبت لغو شد؛ پیامک ارسال نشد.';
+    } elseif (!empty($result['sms_queued'])) {
+        $msg = 'نوبت با موفقیت لغو شد. پیام لغو برای بیمار در صف ارسال قرار گرفت.';
+    } else {
+        $msg = 'نوبت لغو شد، اما ثبت پیامک با خطا مواجه شد.';
+    }
+    flash(($result['ok'] ?? false) || ($result['status'] ?? '') === 'already_cancelled' ? 'success' : 'error', $msg);
+    redirect($redirectTo);
+});
+
+$router->post('/admin/appointments/cancel-bulk', static function (): void {
+    Auth::requireAdmin('appointments.manage');
+    Csrf::assertValid();
+    $idsRaw = $_POST['appointment_ids'] ?? [];
+    if (!is_array($idsRaw)) {
+        $idsRaw = [];
+    }
+    $ids = array_values(array_unique(array_filter(array_map('intval', $idsRaw), static fn (int $v): bool => $v > 0)));
+    $reason = trim((string) ($_POST['reason'] ?? ''));
+    $sendSms = isset($_POST['send_sms']) && (string) $_POST['send_sms'] !== '0';
+    $redirectTo = appointments_cancel_redirect();
+
+    if ($ids === []) {
+        flash('error', 'هیچ نوبتی انتخاب نشده است.');
+        redirect($redirectTo);
+    }
+    if (count($ids) > 500) {
+        flash('error', 'حداکثر ۵۰۰ نوبت در هر درخواست قابل لغو است.');
+        redirect($redirectTo);
+    }
+
+    $summary = (new AppointmentService(db()))->cancelAppointments(
+        $ids,
+        (int) Auth::adminId(),
+        $reason !== '' ? $reason : null,
+        $sendSms
+    );
+
+    audit('appointment.cancel_bulk', 'appointments', null, [
+        'examined' => $summary['examined'],
+        'cancelled' => $summary['cancelled'],
+        'sms_queued' => $summary['sms_queued'],
+        'send_sms' => $sendSms,
+    ]);
+
+    flash('success', appointments_cancel_summary_message($summary, $sendSms));
+    redirect($redirectTo);
+});
+
+$router->post('/admin/appointments/cancel-day', static function (): void {
+    Auth::requireAdmin('appointments.manage');
+    Csrf::assertValid();
+    $date = trim((string) ($_POST['date'] ?? ''));
+    $reason = trim((string) ($_POST['reason'] ?? ''));
+    $sendSms = isset($_POST['send_sms']) && (string) $_POST['send_sms'] !== '0';
+    $redirectTo = appointments_cancel_redirect($date);
+
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        flash('error', 'تاریخ نامعتبر است.');
+        redirect($redirectTo);
+    }
+
+    $summary = (new AppointmentService(db()))->cancelAppointmentsForDay(
+        $date,
+        (int) Auth::adminId(),
+        $reason !== '' ? $reason : null,
+        $sendSms
+    );
+
+    audit('appointment.cancel_day', 'appointments', null, [
+        'date' => $date,
+        'examined' => $summary['examined'] ?? 0,
+        'cancelled' => $summary['cancelled'] ?? 0,
+        'sms_queued' => $summary['sms_queued'] ?? 0,
+        'send_sms' => $sendSms,
+    ]);
+
+    if (($summary['examined'] ?? 0) === 0) {
+        flash('error', 'نوبت قابل لغوی برای این روز یافت نشد.');
+        redirect($redirectTo);
+    }
+
+    flash('success', appointments_cancel_summary_message($summary, $sendSms));
+    redirect($redirectTo);
 });
 
 $router->post('/admin/appointments/delete', static function (): void {

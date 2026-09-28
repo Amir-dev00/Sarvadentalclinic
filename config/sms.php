@@ -16,6 +16,9 @@ return [
     ),
     // SMS.ir Verify template for automatic "tomorrow" appointment reminders
     'appointment_reminder_template_id' => (int) ($_ENV['SMSIR_APPOINTMENT_REMINDER_TEMPLATE_ID'] ?? 0),
+    // SMS.ir Verify templates for appointment confirmation / cancellation
+    'appointment_confirmation_template_id' => (int) ($_ENV['SMSIR_APPOINTMENT_CONFIRMATION_TEMPLATE_ID'] ?? 0),
+    'appointment_cancellation_template_id' => (int) ($_ENV['SMSIR_APPOINTMENT_CANCELLATION_TEMPLATE_ID'] ?? 0),
     'sender' => (string) ($_ENV['SMSIR_LINE_NUMBER'] ?? ($_ENV['SMS_SENDER'] ?? '')),
     'otp_template' => $_ENV['SMS_OTP_TEMPLATE'] ?? '',
 ];

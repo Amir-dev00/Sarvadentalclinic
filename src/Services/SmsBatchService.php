@@ -108,7 +108,16 @@ final class SmsBatchService
         $queued = 0;
         foreach ($recipients as $p) {
             $vars = SmsTemplateRenderer::varsFrom($p, $this->apptVars($p));
-            $message = SmsTemplateRenderer::render($bodyTpl, $vars);
+            $rendered = SmsTemplateRenderer::renderForSend($bodyTpl, $vars);
+            if (!$rendered['ok']) {
+                SmsTemplateRenderer::logRenderError('batch_enqueue', [
+                    'template_id' => isset($tpl['id']) ? (int) $tpl['id'] : null,
+                    'batch_id' => $batchId,
+                    'patient_id' => (int) $p['id'],
+                    'unresolved' => $rendered['unresolved'],
+                ]);
+                continue;
+            }
             $qid = $this->sms->enqueue([
                 'patient_id' => (int) $p['id'],
                 'appointment_id' => !empty($p['appointment_id']) ? (int) $p['appointment_id'] : null,
@@ -116,7 +125,7 @@ final class SmsBatchService
                 'admin_user_id' => $adminId,
                 'batch_id' => $batchId,
                 'mobile' => (string) ($p['mobile_normalized'] ?? $p['mobile']),
-                'message' => $message,
+                'message' => $rendered['message'],
                 'message_type' => $messageType,
                 'source' => $sendMode === 'scheduled' ? 'scheduled' : 'manual',
                 'scheduled_at' => $scheduledAt,

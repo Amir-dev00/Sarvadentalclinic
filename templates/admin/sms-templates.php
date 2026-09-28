@@ -4,8 +4,39 @@ $types = sms_type_labels();
 $placeholders = \Sarva\Services\SmsTemplateRenderer::placeholders();
 ?>
 <div class="admin-card">
+    <h2 style="font-size:1.1rem;color:#031D4F;">قالب‌های SMS.ir (Verify)</h2>
+    <p style="color:#6b7280;font-size:.9rem;margin:0 0 10px;">
+        متن این پیام‌ها در پنل SMS.ir تعریف شده است. تغییر متن در این صفحه روی ارسال واقعی اثر ندارد.
+    </p>
+    <ul style="margin:0;padding-right:1.2rem;line-height:1.9;color:#031D4F;">
+        <li>
+            <strong>تأیید نوبت</strong> —
+            قالب SMS.ir
+            <code dir="ltr">#<?= (int) config('sms.appointment_confirmation_template_id', 0) ?: 159898 ?></code>
+            · پارامترها:
+            <code dir="ltr">FULL_NAME</code>,
+            <code dir="ltr">APPOINTMENT_DATE</code>,
+            <code dir="ltr">APPOINTMENT_TIME</code>
+        </li>
+        <li>
+            <strong>لغو نوبت</strong> —
+            قالب SMS.ir
+            <code dir="ltr">#<?= (int) config('sms.appointment_cancellation_template_id', 0) ?: 296200 ?></code>
+            · پارامترها:
+            <code dir="ltr">FULL_NAME</code>,
+            <code dir="ltr">APPOINTMENT_DATE</code>,
+            <code dir="ltr">APPOINTMENT_TIME</code>
+        </li>
+    </ul>
+</div>
+<div class="admin-card">
     <h2 style="font-size:1.1rem;color:#031D4F;">افزودن / ویرایش قالب</h2>
-    <p style="color:#6b7280;font-size:.9rem;">متغیرها: <?php foreach ($placeholders as $k => $label): ?><code>{<?= e($k) ?>}</code> <?php endforeach; ?></p>
+    <p style="color:#6b7280;font-size:.9rem;margin-bottom:.5rem;">متغیرها (برای درج کلیک کنید):</p>
+    <div class="sms-vars" style="margin-bottom:1rem;">
+        <?php foreach ($placeholders as $k => $label): ?>
+            <button type="button" class="sms-var tpl-var-chip" data-var="#<?= e($k) ?>#" title="<?= e($label) ?>">#<?= e($k) ?>#</button>
+        <?php endforeach; ?>
+    </div>
     <form method="post" action="<?= url('/admin/sms/templates/save') ?>" class="row g-3" id="tplForm">
         <?= csrf_field() ?>
         <input type="hidden" name="id" id="tpl_id" value="0">
@@ -69,6 +100,23 @@ $placeholders = \Sarva\Services\SmsTemplateRenderer::placeholders();
     </table>
 </div>
 <script>
+function insertTplVar(token) {
+    var ta = document.getElementById('tpl_body');
+    if (!ta || !token) return;
+    ta.focus();
+    var start = ta.selectionStart || 0;
+    var end = ta.selectionEnd || 0;
+    var val = ta.value || '';
+    ta.value = val.slice(0, start) + token + val.slice(end);
+    var pos = start + token.length;
+    ta.setSelectionRange(pos, pos);
+    tplCount();
+}
+document.querySelectorAll('.tpl-var-chip').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+        insertTplVar(btn.getAttribute('data-var'));
+    });
+});
 function tplCount() {
     var t = document.getElementById('tpl_body').value || '';
     var n = t.length;
@@ -77,11 +125,14 @@ function tplCount() {
     var sample = {
         first_name: 'علی', last_name: 'رضایی', full_name: 'علی رضایی',
         patient_number: 'P1001', mobile: '09120000000',
-        appointment_date: '1405/06/15', appointment_time: '10:30',
-        doctor_name: 'دکتر نمونه', service_name: 'ویزیت',
-        clinic_name: 'کلینیک دندانپزشکی سروا', clinic_phone: ''
+        appointment_date: '1405/07/07', appointment_time: '18:30',
+        doctor_name: 'دکتر زمان زاده', service_name: 'ویزیت',
+        clinic_name: 'کلینیک دندانپزشکی سروا', clinic_phone: '',
+        cancellation_reason: 'تعطیلی کلینیک'
     };
-    var preview = t.replace(/\{([a-zA-Z0-9_]+)\}/g, function (_, k) {
+    // Match SmsTemplateRenderer: legacy {var} → #var#, then replace #var#
+    var normalized = t.replace(/\{([a-zA-Z0-9_]+)\}/g, '#$1#');
+    var preview = normalized.replace(/#([a-zA-Z0-9_]+)#/g, function (_, k) {
         return Object.prototype.hasOwnProperty.call(sample, k) ? sample[k] : '';
     });
     document.getElementById('tplPreview').textContent = preview || 'پیش‌نمایش خالی است.';

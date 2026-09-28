@@ -246,7 +246,7 @@ $catLabels = [
                         <textarea id="smsMessage" class="form-control" rows="8" placeholder="متن پیام را بنویسید..."></textarea>
                         <div class="sms-vars">
                             <?php foreach ($placeholders as $key => $label): ?>
-                            <button type="button" class="sms-var" data-var="{<?= e($key) ?>}">{<?= e($label) ?></button>
+                            <button type="button" class="sms-var" data-var="#<?= e($key) ?>#" title="#<?= e($key) ?>#"><?= e($label) ?> <code dir="ltr">#<?= e($key) ?>#</code></button>
                             <?php endforeach; ?>
                         </div>
                         <div class="sms-msg-meta">

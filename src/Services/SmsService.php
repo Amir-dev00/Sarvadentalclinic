@@ -19,6 +19,89 @@ final class SmsService
     }
 
     /**
+     * Queue an SMS.ir Verify/template job (no local text rendering required for provider send).
+     *
+     * @param array{
+     *   patient_id?:?int,
+     *   appointment_id?:?int,
+     *   admin_user_id?:?int,
+     *   mobile:string,
+     *   message_type:string,
+     *   provider_template_id:int,
+     *   template_parameters:array<string,string>,
+     *   source?:string,
+     *   scheduled_at?:?string,
+     *   idempotency_key?:?string,
+     *   appointment_starts_at?:?string,
+     *   log_message?:string
+     * } $job
+     */
+    public function enqueueSmsIrTemplate(array $job): int
+    {
+        $this->ensureQueueTemplateColumns();
+
+        $mobile = normalize_mobile((string) ($job['mobile'] ?? ''));
+        if ($mobile === null) {
+            return 0;
+        }
+
+        $templateId = (int) ($job['provider_template_id'] ?? 0);
+        if ($templateId <= 0) {
+            SmsTemplateRenderer::logSmsIrParameterError([
+                'appointment_id' => !empty($job['appointment_id']) ? (int) $job['appointment_id'] : null,
+                'message_type' => (string) ($job['message_type'] ?? ''),
+                'missing_parameter_names' => ['provider_template_id'],
+            ]);
+            return 0;
+        }
+
+        /** @var array<string, string> $params */
+        $params = [];
+        foreach ((array) ($job['template_parameters'] ?? []) as $k => $v) {
+            $params[(string) $k] = trim((string) $v);
+        }
+        $missing = SmsTemplateRenderer::missingSmsIrParameters($params);
+        if ($missing !== []) {
+            SmsTemplateRenderer::logSmsIrParameterError([
+                'template_id' => $templateId,
+                'appointment_id' => !empty($job['appointment_id']) ? (int) $job['appointment_id'] : null,
+                'message_type' => (string) ($job['message_type'] ?? ''),
+                'missing_parameter_names' => $missing,
+            ]);
+            return 0;
+        }
+
+        $messageType = (string) ($job['message_type'] ?? 'general');
+        $summary = trim((string) ($job['log_message'] ?? ''));
+        if ($summary === '') {
+            $summary = sprintf(
+                '[SMS.ir template %d] %s | %s | %s',
+                $templateId,
+                $params['FULL_NAME'] ?? '',
+                $params['APPOINTMENT_DATE'] ?? '',
+                $params['APPOINTMENT_TIME'] ?? ''
+            );
+        }
+
+        return $this->enqueue([
+            'patient_id' => $job['patient_id'] ?? null,
+            'appointment_id' => $job['appointment_id'] ?? null,
+            'admin_user_id' => $job['admin_user_id'] ?? null,
+            'mobile' => $mobile,
+            'message' => $summary,
+            'message_type' => $messageType,
+            'source' => $job['source'] ?? 'automation',
+            'scheduled_at' => $job['scheduled_at'] ?? null,
+            'idempotency_key' => $job['idempotency_key'] ?? null,
+            'appointment_starts_at' => $job['appointment_starts_at'] ?? null,
+            'send_mode' => 'smsir_template',
+            'provider_template_id' => $templateId,
+            'template_parameters' => $params,
+            'skip_placeholder_check' => true,
+        ]);
+    }
+
+    /**
      * Enqueue one SMS. Returns queue id or 0 if skipped/duplicate.
      *
      * @param array{
@@ -34,11 +117,17 @@ final class SmsService
      *   source?:string,
      *   scheduled_at?:?string,
      *   idempotency_key?:?string,
-     *   appointment_starts_at?:?string
+     *   appointment_starts_at?:?string,
+     *   send_mode?:string,
+     *   provider_template_id?:?int,
+     *   template_parameters?:array<string,string>,
+     *   skip_placeholder_check?:bool
      * } $job
      */
     public function enqueue(array $job): int
     {
+        $this->ensureQueueTemplateColumns();
+
         $mobile = normalize_mobile((string) ($job['mobile'] ?? ''));
         if ($mobile === null) {
             return 0;
@@ -46,6 +135,21 @@ final class SmsService
         $message = trim((string) ($job['message'] ?? ''));
         if ($message === '') {
             return 0;
+        }
+
+        $sendMode = (string) ($job['send_mode'] ?? 'text');
+        if ($sendMode !== 'smsir_template' && empty($job['skip_placeholder_check'])) {
+            $unresolved = SmsTemplateRenderer::findUnresolvedKnownPlaceholders($message);
+            if ($unresolved !== []) {
+                SmsTemplateRenderer::logRenderError('enqueue_blocked', [
+                    'template_id' => !empty($job['template_id']) ? (int) $job['template_id'] : null,
+                    'appointment_id' => !empty($job['appointment_id']) ? (int) $job['appointment_id'] : null,
+                    'message_type' => (string) ($job['message_type'] ?? ''),
+                    'source' => (string) ($job['source'] ?? ''),
+                    'unresolved' => $unresolved,
+                ]);
+                return 0;
+            }
         }
 
         $messageType = (string) ($job['message_type'] ?? 'general');
@@ -80,9 +184,71 @@ final class SmsService
         $max = max(1, min(5, (int) setting('sms_max_retries', 3)));
         $scheduled = $job['scheduled_at'] ?? date('Y-m-d H:i:s');
         $batchId = !empty($job['batch_id']) ? (int) $job['batch_id'] : null;
+        $providerTemplateId = !empty($job['provider_template_id']) ? (int) $job['provider_template_id'] : null;
+        $paramsJson = null;
+        if (!empty($job['template_parameters']) && is_array($job['template_parameters'])) {
+            $paramsJson = json_encode($job['template_parameters'], JSON_UNESCAPED_UNICODE);
+        }
+
         try {
             $hasBatch = $this->hasBatchColumn();
-            if ($hasBatch) {
+            $hasTplCols = $this->hasTemplateQueueColumns();
+            if ($hasBatch && $hasTplCols) {
+                $stmt = $this->db->prepare(
+                    'INSERT INTO sms_queue
+                     (patient_id, appointment_id, template_id, automation_rule_id, admin_user_id, batch_id, mobile, rendered_message,
+                      message_type, source, status, max_attempts, scheduled_at, idempotency_key, appointment_starts_at,
+                      send_mode, provider_template_id, template_parameters_json)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                );
+                $stmt->execute([
+                    $job['patient_id'] ?? null,
+                    $appointmentId,
+                    $job['template_id'] ?? null,
+                    $job['automation_rule_id'] ?? null,
+                    $job['admin_user_id'] ?? null,
+                    $batchId,
+                    $mobile,
+                    $message,
+                    $messageType,
+                    $job['source'] ?? 'manual',
+                    'pending',
+                    $max,
+                    $scheduled,
+                    $key,
+                    $job['appointment_starts_at'] ?? null,
+                    $sendMode === 'smsir_template' ? 'smsir_template' : 'text',
+                    $providerTemplateId,
+                    $paramsJson,
+                ]);
+            } elseif ($hasTplCols) {
+                $stmt = $this->db->prepare(
+                    'INSERT INTO sms_queue
+                     (patient_id, appointment_id, template_id, automation_rule_id, admin_user_id, mobile, rendered_message,
+                      message_type, source, status, max_attempts, scheduled_at, idempotency_key, appointment_starts_at,
+                      send_mode, provider_template_id, template_parameters_json)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                );
+                $stmt->execute([
+                    $job['patient_id'] ?? null,
+                    $appointmentId,
+                    $job['template_id'] ?? null,
+                    $job['automation_rule_id'] ?? null,
+                    $job['admin_user_id'] ?? null,
+                    $mobile,
+                    $message,
+                    $messageType,
+                    $job['source'] ?? 'manual',
+                    'pending',
+                    $max,
+                    $scheduled,
+                    $key,
+                    $job['appointment_starts_at'] ?? null,
+                    $sendMode === 'smsir_template' ? 'smsir_template' : 'text',
+                    $providerTemplateId,
+                    $paramsJson,
+                ]);
+            } elseif ($hasBatch) {
                 $stmt = $this->db->prepare(
                     'INSERT INTO sms_queue
                      (patient_id, appointment_id, template_id, automation_rule_id, admin_user_id, batch_id, mobile, rendered_message,
@@ -152,6 +318,44 @@ final class SmsService
             $cached = false;
         }
         return $cached;
+    }
+
+    private function hasTemplateQueueColumns(): bool
+    {
+        static $cached = null;
+        if ($cached === true) {
+            return true;
+        }
+        try {
+            $st = $this->db->query("SHOW COLUMNS FROM sms_queue LIKE 'provider_template_id'");
+            $cached = (bool) $st->fetch();
+        } catch (\Throwable) {
+            $cached = false;
+        }
+        return (bool) $cached;
+    }
+
+    public function ensureQueueTemplateColumns(): void
+    {
+        static $done = false;
+        if ($done) {
+            return;
+        }
+        $done = true;
+        $cols = [
+            'send_mode' => "VARCHAR(30) NOT NULL DEFAULT 'text'",
+            'provider_template_id' => 'INT UNSIGNED NULL',
+            'template_parameters_json' => 'TEXT NULL',
+        ];
+        foreach ($cols as $name => $ddl) {
+            try {
+                $exists = $this->db->query('SHOW COLUMNS FROM sms_queue LIKE ' . $this->db->quote($name))->fetch(PDO::FETCH_ASSOC);
+                if (!$exists) {
+                    $this->db->exec("ALTER TABLE sms_queue ADD COLUMN `{$name}` {$ddl}");
+                }
+            } catch (\Throwable) {
+            }
+        }
     }
 
     /** @param list<array<string, mixed>> $jobs */
@@ -238,11 +442,21 @@ final class SmsService
             );
             $appt->execute([$appointmentId]);
             $a = $appt->fetch(PDO::FETCH_ASSOC);
-            if (!$a || $a['deleted_at'] || in_array($a['status'], ['cancelled', 'expired', 'no_show', 'completed', 'awaiting_payment'], true)) {
+            $messageType = (string) ($row['message_type'] ?? '');
+            $isCancellationSms = $messageType === 'appointment_cancellation';
+            if (!$a || $a['deleted_at']) {
                 $this->finish($id, 'cancelled', 'نوبت دیگر واجد شرایط ارسال نیست.');
                 return 'cancelled';
             }
-            if (($row['message_type'] ?? '') === 'appointment_reminder' && !empty($a['reminder_sent_at'])) {
+            // Cancellation SMS is intentionally sent after status=cancelled.
+            if (
+                !$isCancellationSms
+                && in_array($a['status'], ['cancelled', 'expired', 'no_show', 'completed', 'awaiting_payment'], true)
+            ) {
+                $this->finish($id, 'cancelled', 'نوبت دیگر واجد شرایط ارسال نیست.');
+                return 'cancelled';
+            }
+            if ($messageType === 'appointment_reminder' && !empty($a['reminder_sent_at'])) {
                 $this->finish($id, 'cancelled', 'یادآوری این نوبت قبلاً ارسال شده است.');
                 return 'cancelled';
             }
@@ -270,13 +484,37 @@ final class SmsService
                 $tpl->execute([(int) $row['template_id']]);
                 $body = (string) $tpl->fetchColumn();
                 if ($body !== '') {
-                    $message = SmsTemplateRenderer::render($body, SmsTemplateRenderer::varsFrom($a, $a + [
+                    $rendered = SmsTemplateRenderer::renderForSend($body, SmsTemplateRenderer::varsFrom($a, $a + [
                         'starts_at' => $a['starts_at'],
                     ]));
+                    if (!$rendered['ok']) {
+                        SmsTemplateRenderer::logRenderError('queue_re_render', [
+                            'template_id' => (int) $row['template_id'],
+                            'queue_id' => $id,
+                            'appointment_id' => $appointmentId,
+                            'unresolved' => $rendered['unresolved'],
+                        ]);
+                        $this->finish($id, 'failed', 'template_render_error: ' . implode(',', $rendered['unresolved']));
+                        return 'failed';
+                    }
+                    $message = $rendered['message'];
                     $this->db->prepare('UPDATE sms_queue SET rendered_message=?, appointment_starts_at=? WHERE id=?')
                         ->execute([$message, $a['starts_at'], $id]);
                 }
             }
+        }
+
+        $unresolvedQueued = SmsTemplateRenderer::findUnresolvedKnownPlaceholders($message);
+        $sendMode = (string) ($row['send_mode'] ?? 'text');
+        if ($sendMode !== 'smsir_template' && $unresolvedQueued !== []) {
+            SmsTemplateRenderer::logRenderError('queue_send_blocked', [
+                'template_id' => !empty($row['template_id']) ? (int) $row['template_id'] : null,
+                'queue_id' => $id,
+                'appointment_id' => $appointmentId,
+                'unresolved' => $unresolvedQueued,
+            ]);
+            $this->finish($id, 'failed', 'template_render_error: ' . implode(',', $unresolvedQueued));
+            return 'failed';
         }
 
         $attempts = (int) $row['attempts'] + 1;
@@ -314,7 +552,7 @@ final class SmsService
     }
 
     /**
-     * Deliver via SMS.ir verify template for appointment reminders when configured.
+     * Deliver via SMS.ir verify template when configured for reminder/confirmation/cancellation.
      *
      * @param array<string, mixed> $row
      * @param array<string, mixed>|null $appointment
@@ -328,16 +566,59 @@ final class SmsService
     ): array {
         $mobile = (string) $row['mobile'];
         $type = (string) ($row['message_type'] ?? 'general');
-        $templateId = (int) config('sms.appointment_reminder_template_id', 0);
+        $sendMode = (string) ($row['send_mode'] ?? 'text');
 
-        if ($type === 'appointment_reminder' && $templateId > 0 && $appointment) {
+        // Prefer stored SMS.ir template job payload
+        if ($sendMode === 'smsir_template' || in_array($type, ['appointment_confirmation', 'appointment_cancellation'], true)) {
+            $templateId = (int) ($row['provider_template_id'] ?? 0);
+            if ($templateId <= 0) {
+                $templateId = match ($type) {
+                    'appointment_confirmation' => (int) config('sms.appointment_confirmation_template_id', 0),
+                    'appointment_cancellation' => (int) config('sms.appointment_cancellation_template_id', 0),
+                    default => 0,
+                };
+            }
+
+            $paramsAssoc = $this->resolveTemplateParameters($row, $appointment);
+            if ($templateId > 0) {
+                $missing = SmsTemplateRenderer::missingSmsIrParameters($paramsAssoc);
+                if ($missing !== []) {
+                    SmsTemplateRenderer::logSmsIrParameterError([
+                        'template_id' => $templateId,
+                        'appointment_id' => !empty($row['appointment_id']) ? (int) $row['appointment_id'] : null,
+                        'missing_parameter_names' => $missing,
+                        'message_type' => $type,
+                    ]);
+                    return [
+                        'ok' => false,
+                        'provider' => SmsManager::driver(),
+                        'error' => 'پارامترهای قالب SMS.ir ناقص است: ' . implode(',', $missing),
+                        'permanent' => true,
+                        'message_channel' => 'verify',
+                        'provider_template_id' => $templateId,
+                    ];
+                }
+
+                $result = $provider->sendTemplate(
+                    $mobile,
+                    $templateId,
+                    SmsTemplateRenderer::toSmsIrParameterList($paramsAssoc)
+                );
+                $result['provider_template_id'] = $templateId;
+                $result['message_channel'] = $result['message_channel'] ?? 'verify';
+                return $result;
+            }
+        }
+
+        $reminderTemplateId = (int) config('sms.appointment_reminder_template_id', 0);
+        if ($type === 'appointment_reminder' && $reminderTemplateId > 0 && $appointment) {
             $fullName = trim((string) ($appointment['first_name'] ?? '') . ' ' . (string) ($appointment['last_name'] ?? ''));
             if ($fullName === '') {
                 $fullName = 'مراجع';
             }
             $apptTime = date('H:i', strtotime((string) ($appointment['starts_at'] ?? '')) ?: time());
 
-            return $provider->sendTemplate($mobile, $templateId, [
+            return $provider->sendTemplate($mobile, $reminderTemplateId, [
                 ['name' => 'FULL_NAME', 'value' => $fullName],
                 ['name' => 'APPOINTMENT_TIME', 'value' => $apptTime],
             ]);
@@ -348,6 +629,46 @@ final class SmsService
         }
 
         return $provider->sendMessage($mobile, $message);
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @param array<string, mixed>|null $appointment
+     * @return array<string, string>
+     */
+    private function resolveTemplateParameters(array $row, ?array $appointment): array
+    {
+        $fromJson = [];
+        $raw = $row['template_parameters_json'] ?? null;
+        if (is_string($raw) && $raw !== '') {
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded)) {
+                foreach ($decoded as $k => $v) {
+                    $fromJson[(string) $k] = trim((string) $v);
+                }
+            }
+        }
+        if (
+            trim((string) ($fromJson['FULL_NAME'] ?? '')) !== ''
+            && trim((string) ($fromJson['APPOINTMENT_DATE'] ?? '')) !== ''
+            && trim((string) ($fromJson['APPOINTMENT_TIME'] ?? '')) !== ''
+        ) {
+            return [
+                'FULL_NAME' => $fromJson['FULL_NAME'],
+                'APPOINTMENT_DATE' => $fromJson['APPOINTMENT_DATE'],
+                'APPOINTMENT_TIME' => $fromJson['APPOINTMENT_TIME'],
+            ];
+        }
+
+        if ($appointment) {
+            return SmsTemplateRenderer::buildSmsIrAppointmentParameters($appointment, $appointment);
+        }
+
+        return [
+            'FULL_NAME' => (string) ($fromJson['FULL_NAME'] ?? ''),
+            'APPOINTMENT_DATE' => (string) ($fromJson['APPOINTMENT_DATE'] ?? ''),
+            'APPOINTMENT_TIME' => (string) ($fromJson['APPOINTMENT_TIME'] ?? ''),
+        ];
     }
 
     private function reminderAlreadyHandled(int $appointmentId): bool
@@ -408,9 +729,15 @@ final class SmsService
         $safeSend['message_type'] = $messageType;
         $safeSend['source'] = $source;
         $safeSend['message_channel'] = $safeSend['message_channel']
-            ?? (($messageType === 'appointment_reminder' && (int) config('sms.appointment_reminder_template_id', 0) > 0)
+            ?? ((($messageType === 'appointment_reminder' && (int) config('sms.appointment_reminder_template_id', 0) > 0)
+                || ($messageType === 'appointment_confirmation' && (int) config('sms.appointment_confirmation_template_id', 0) > 0)
+                || ($messageType === 'appointment_cancellation' && (int) config('sms.appointment_cancellation_template_id', 0) > 0)
+                || (($row['send_mode'] ?? '') === 'smsir_template'))
                 ? 'verify'
                 : 'bulk');
+        if (!empty($row['provider_template_id']) || !empty($safeSend['provider_template_id'])) {
+            $safeSend['provider_template_id'] = (int) ($safeSend['provider_template_id'] ?? $row['provider_template_id']);
+        }
         if ($source === 'automation' || !empty($row['automation_rule_id'])) {
             $safeSend['message_type'] = $safeSend['message_type'] ?: 'automation';
             $safeSend['automation_rule_id'] = $row['automation_rule_id'] ?: null;
@@ -432,6 +759,7 @@ final class SmsService
                 'automation_rule_id' => $safeSend['automation_rule_id'] ?? null,
                 'event' => $safeSend['event'] ?? null,
                 'duration_ms' => $safeSend['duration_ms'] ?? null,
+                'provider_template_id' => $safeSend['provider_template_id'] ?? ($row['provider_template_id'] ?? null),
             ];
             if ($this->hasLogBatchColumn()) {
                 $this->db->prepare(
@@ -518,7 +846,8 @@ final class SmsService
     {
         $this->db->prepare(
             "UPDATE sms_queue SET status='cancelled', last_error='نوبت لغو یا نامعتبر شد'
-             WHERE appointment_id=? AND status IN ('pending','retrying')"
+             WHERE appointment_id=? AND status IN ('pending','retrying')
+               AND (message_type IS NULL OR message_type <> 'appointment_cancellation')"
         )->execute([$appointmentId]);
     }
 

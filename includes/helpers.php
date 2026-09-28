@@ -606,3 +606,45 @@ function pager_url(array $query, int $page): string
     $query['page'] = $page;
     return '?' . http_build_query($query);
 }
+
+/** Preserve appointments list filters after cancel actions. */
+function appointments_cancel_redirect(?string $forceDate = null): string
+{
+    $q = [];
+    $patientId = (int) ($_POST['patient_id'] ?? $_GET['patient_id'] ?? 0);
+    if ($patientId > 0) {
+        $q['patient_id'] = $patientId;
+    }
+    $date = $forceDate !== null ? $forceDate : trim((string) ($_POST['redirect_date'] ?? $_POST['date'] ?? $_GET['date'] ?? ''));
+    if ($date !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        $q['date'] = $date;
+    }
+    $path = '/admin/appointments';
+    return $q === [] ? $path : $path . '?' . http_build_query($q);
+}
+
+/** @param array<string, mixed> $summary */
+function appointments_cancel_summary_message(array $summary, bool $sendSms): string
+{
+    $lines = [];
+    $lines[] = ((int) ($summary['examined'] ?? 0)) . ' نوبت بررسی شد';
+    $lines[] = ((int) ($summary['cancelled'] ?? 0)) . ' نوبت لغو شد';
+    if ($sendSms) {
+        $lines[] = ((int) ($summary['sms_queued'] ?? 0)) . ' پیامک در صف ارسال قرار گرفت';
+        if ((int) ($summary['sms_failed'] ?? 0) > 0) {
+            $lines[] = ((int) $summary['sms_failed']) . ' پیامک ثبت نشد';
+        }
+    } else {
+        $lines[] = 'پیامک ارسال نشد (غیرفعال توسط مدیر)';
+    }
+    if ((int) ($summary['already_cancelled'] ?? 0) > 0) {
+        $lines[] = ((int) $summary['already_cancelled']) . ' نوبت قبلاً لغو شده بود';
+    }
+    if ((int) ($summary['not_cancellable'] ?? 0) > 0) {
+        $lines[] = ((int) $summary['not_cancellable']) . ' نوبت قابل لغو نبود';
+    }
+    if ((int) ($summary['not_found'] ?? 0) > 0) {
+        $lines[] = ((int) $summary['not_found']) . ' نوبت یافت نشد';
+    }
+    return implode(' · ', $lines);
+}
