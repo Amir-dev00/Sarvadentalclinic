@@ -1,0 +1,31 @@
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies
+/vendor/
+
+# Runtime / uploads
+/storage/imports/*
+!/storage/imports/.gitkeep
+/storage/logs/*
+!/storage/logs/.gitkeep
+/storage/cache/*
+/assets/uploads/
+/public/assets/uploads/
+
+# Logs & junk
+error_log
+*.log
+*.zip
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# PHP
+php.ini
+.user.ini
