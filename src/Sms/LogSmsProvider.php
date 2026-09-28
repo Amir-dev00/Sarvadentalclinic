@@ -34,7 +34,15 @@ final class LogSmsProvider implements SmsProviderInterface
     {
         return $this->log('template', $mobile, 'verify-template', [
             'template_id' => $templateId,
-            'parameters' => $parameters,
+            'parameters' => array_map(static function (array $p): array {
+                // Never persist OTP CODE values from template params in log driver extras for otp flows.
+                $name = (string) ($p['name'] ?? '');
+                $value = (string) ($p['value'] ?? '');
+                if (strcasecmp($name, 'CODE') === 0) {
+                    $value = '[redacted]';
+                }
+                return ['name' => $name, 'value' => $value];
+            }, $parameters),
         ]);
     }
 
@@ -53,6 +61,11 @@ final class LogSmsProvider implements SmsProviderInterface
             'extra' => $extra,
         ], JSON_UNESCAPED_UNICODE) . PHP_EOL;
         file_put_contents($dir . '/sms.log', $line, FILE_APPEND);
-        return ['ok' => true, 'provider' => 'log', 'message_id' => uniqid('log_', true)];
+        return [
+            'ok' => true,
+            'provider' => 'log',
+            'message_id' => uniqid('log_', true),
+            'duration_ms' => 0,
+        ];
     }
 }

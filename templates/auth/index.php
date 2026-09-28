@@ -28,12 +28,13 @@
             <div class="auth-step" data-step="otp" style="display:none;">
                 <p class="text-center mb-2" style="color:#031D4F;">کد ۶ رقمی ارسال‌شده به <strong id="otpMobileLabel" dir="ltr"></strong> را وارد کنید</p>
                 <div class="otp-inputs" id="otpInputs">
-                    <input type="text" inputmode="numeric" maxlength="1" aria-label="رقم ۱" autocomplete="one-time-code">
-                    <input type="text" inputmode="numeric" maxlength="1" aria-label="رقم ۲">
-                    <input type="text" inputmode="numeric" maxlength="1" aria-label="رقم ۳">
-                    <input type="text" inputmode="numeric" maxlength="1" aria-label="رقم ۴">
-                    <input type="text" inputmode="numeric" maxlength="1" aria-label="رقم ۵">
-                    <input type="text" inputmode="numeric" maxlength="1" aria-label="رقم ۶">
+                    <!-- First box accepts full autofill (iOS/Android); digits are split across boxes -->
+                    <input type="text" id="otpDigit0" name="one-time-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" enterkeyhint="done" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="رقم ۱ / کد تأیید" dir="ltr">
+                    <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" enterkeyhint="done" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="رقم ۲" dir="ltr">
+                    <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" enterkeyhint="done" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="رقم ۳" dir="ltr">
+                    <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" enterkeyhint="done" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="رقم ۴" dir="ltr">
+                    <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" enterkeyhint="done" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="رقم ۵" dir="ltr">
+                    <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" enterkeyhint="done" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="رقم ۶" dir="ltr">
                 </div>
                 <button type="button" class="btn btn-primary w-100" id="btnVerifyOtp" style="background:#05B18B;border-color:#05B18B;border-radius:14px;padding:12px;">
                     تأیید کد
@@ -111,12 +112,39 @@
     }
 
     function getOtpCode() {
-        return otpInputs.map(function (i) { return i.value.replace(/\D/g, ''); }).join('');
+        return otpInputs.map(function (i) { return (i.value || '').replace(/\D/g, '').slice(0, 1); }).join('');
+    }
+
+    function fillOtp(raw) {
+        var digits = String(raw || '').replace(/\D/g, '').slice(0, 6);
+        otpInputs.forEach(function (input, i) {
+            input.value = digits.charAt(i) || '';
+        });
+        if (digits.length === 6) {
+            verifyOtp();
+        } else if (otpInputs[digits.length]) {
+            otpInputs[digits.length].focus();
+        }
     }
 
     function clearOtp() {
         otpInputs.forEach(function (i) { i.value = ''; });
         if (otpInputs[0]) otpInputs[0].focus();
+    }
+
+    function listenWebOtp() {
+        if (!('OTPCredential' in window) || !navigator.credentials) return;
+        if (window.__sarvaOtpAbort) {
+            try { window.__sarvaOtpAbort.abort(); } catch (e) {}
+        }
+        var ac = new AbortController();
+        window.__sarvaOtpAbort = ac;
+        navigator.credentials.get({
+            otp: { transport: ['sms'] },
+            signal: ac.signal
+        }).then(function (cred) {
+            if (cred && cred.code) fillOtp(cred.code);
+        }).catch(function () {});
     }
 
     function startCountdown(sec) {
@@ -188,6 +216,8 @@
             clearOtp();
             showStep('otp');
             startCountdown(result.data.resend_in || 60);
+            listenWebOtp();
+            if (otpInputs[0]) otpInputs[0].focus();
             if (result.data.dev_code) {
                 showAlert('حالت توسعه: کد تأیید شما ' + result.data.dev_code + ' است (پیامک واقعی ارسال نمی‌شود).', 'success');
                 // Prefill OTP boxes for convenience in demo mode
@@ -272,7 +302,12 @@
 
     otpInputs.forEach(function (input, idx) {
         input.addEventListener('input', function () {
-            input.value = input.value.replace(/\D/g, '').slice(0, 1);
+            var digits = input.value.replace(/\D/g, '');
+            if (digits.length > 1) {
+                fillOtp(digits);
+                return;
+            }
+            input.value = digits.slice(0, 1);
             if (input.value && otpInputs[idx + 1]) otpInputs[idx + 1].focus();
             if (getOtpCode().length === 6) verifyOtp();
         });
@@ -288,12 +323,8 @@
         });
         input.addEventListener('paste', function (e) {
             e.preventDefault();
-            var text = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '').slice(0, 6);
-            text.split('').forEach(function (ch, i) {
-                if (otpInputs[i]) otpInputs[i].value = ch;
-            });
-            if (text.length === 6) verifyOtp();
-            else if (otpInputs[text.length]) otpInputs[text.length].focus();
+            var text = (e.clipboardData || window.clipboardData).getData('text');
+            fillOtp(text);
         });
     });
 
