@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /patient
+Disallow: /api
+Disallow: /storage
+
+Sitemap: /sitemap.php

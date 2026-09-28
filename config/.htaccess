@@ -1,0 +1,2 @@
+# Deny HTTP access to config
+Require all denied

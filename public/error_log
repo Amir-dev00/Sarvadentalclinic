@@ -1,0 +1,178 @@
+[07-Sep-2026 10:48:38 Asia/Tehran] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'ydlknymz_sarva.patient_visits' doesn't exist in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php:97
+Stack trace:
+#0 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php(97): PDO->prepare('SELECT p.*,\n   ...')
+#1 /home3/ydlknymz/sarvadentalclinic.ir/admin/crm-routes.php(35): Sarva\Services\PatientCrmService->search(Array, 1)
+#2 /home3/ydlknymz/sarvadentalclinic.ir/src/Core/Router.php(54): {closure:/home3/ydlknymz/sarvadentalclinic.ir/admin/crm-routes.php:22}()
+#3 /home3/ydlknymz/sarvadentalclinic.ir/public/index.php(18): Sarva\Core\Router->dispatch('GET', '/admin/patients')
+#4 {main}
+  thrown in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php on line 97
+[07-Sep-2026 10:48:40 Asia/Tehran] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'ydlknymz_sarva.patient_visits' doesn't exist in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php:97
+Stack trace:
+#0 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php(97): PDO->prepare('SELECT p.*,\n   ...')
+#1 /home3/ydlknymz/sarvadentalclinic.ir/admin/crm-routes.php(35): Sarva\Services\PatientCrmService->search(Array, 1)
+#2 /home3/ydlknymz/sarvadentalclinic.ir/src/Core/Router.php(54): {closure:/home3/ydlknymz/sarvadentalclinic.ir/admin/crm-routes.php:22}()
+#3 /home3/ydlknymz/sarvadentalclinic.ir/public/index.php(18): Sarva\Core\Router->dispatch('GET', '/admin/patients')
+#4 {main}
+  thrown in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php on line 97
+[07-Sep-2026 10:48:49 Asia/Tehran] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'ydlknymz_sarva.patient_visits' doesn't exist in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php:97
+Stack trace:
+#0 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php(97): PDO->prepare('SELECT p.*,\n   ...')
+#1 /home3/ydlknymz/sarvadentalclinic.ir/admin/crm-routes.php(35): Sarva\Services\PatientCrmService->search(Array, 1)
+#2 /home3/ydlknymz/sarvadentalclinic.ir/src/Core/Router.php(54): {closure:/home3/ydlknymz/sarvadentalclinic.ir/admin/crm-routes.php:22}()
+#3 /home3/ydlknymz/sarvadentalclinic.ir/public/index.php(18): Sarva\Core\Router->dispatch('GET', '/admin/patients')
+#4 {main}
+  thrown in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php on line 97
+[07-Sep-2026 10:48:55 Asia/Tehran] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'ydlknymz_sarva.patient_visits' doesn't exist in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php:97
+Stack trace:
+#0 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php(97): PDO->prepare('SELECT p.*,\n   ...')
+#1 /home3/ydlknymz/sarvadentalclinic.ir/admin/crm-routes.php(35): Sarva\Services\PatientCrmService->search(Array, 1)
+#2 /home3/ydlknymz/sarvadentalclinic.ir/src/Core/Router.php(54): {closure:/home3/ydlknymz/sarvadentalclinic.ir/admin/crm-routes.php:22}()
+#3 /home3/ydlknymz/sarvadentalclinic.ir/public/index.php(18): Sarva\Core\Router->dispatch('GET', '/admin/patients')
+#4 {main}
+  thrown in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php on line 97
+[07-Sep-2026 10:54:28 Asia/Tehran] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'ydlknymz_sarva.patient_visits' doesn't exist in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php:97
+Stack trace:
+#0 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php(97): PDO->prepare('SELECT p.*,\n   ...')
+#1 /home3/ydlknymz/sarvadentalclinic.ir/admin/crm-routes.php(35): Sarva\Services\PatientCrmService->search(Array, 1)
+#2 /home3/ydlknymz/sarvadentalclinic.ir/src/Core/Router.php(54): {closure:/home3/ydlknymz/sarvadentalclinic.ir/admin/crm-routes.php:22}()
+#3 /home3/ydlknymz/sarvadentalclinic.ir/public/index.php(18): Sarva\Core\Router->dispatch('GET', '/admin/patients')
+#4 {main}
+  thrown in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php on line 97
+[07-Sep-2026 10:54:29 Asia/Tehran] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'ydlknymz_sarva.patient_visits' doesn't exist in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php:97
+Stack trace:
+#0 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php(97): PDO->prepare('SELECT p.*,\n   ...')
+#1 /home3/ydlknymz/sarvadentalclinic.ir/admin/crm-routes.php(35): Sarva\Services\PatientCrmService->search(Array, 1)
+#2 /home3/ydlknymz/sarvadentalclinic.ir/src/Core/Router.php(54): {closure:/home3/ydlknymz/sarvadentalclinic.ir/admin/crm-routes.php:22}()
+#3 /home3/ydlknymz/sarvadentalclinic.ir/public/index.php(18): Sarva\Core\Router->dispatch('GET', '/admin/patients')
+#4 {main}
+  thrown in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php on line 97
+[07-Sep-2026 10:54:33 Asia/Tehran] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'ydlknymz_sarva.patient_visits' doesn't exist in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php:97
+Stack trace:
+#0 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php(97): PDO->prepare('SELECT p.*,\n   ...')
+#1 /home3/ydlknymz/sarvadentalclinic.ir/admin/crm-routes.php(35): Sarva\Services\PatientCrmService->search(Array, 1)
+#2 /home3/ydlknymz/sarvadentalclinic.ir/src/Core/Router.php(54): {closure:/home3/ydlknymz/sarvadentalclinic.ir/admin/crm-routes.php:22}()
+#3 /home3/ydlknymz/sarvadentalclinic.ir/public/index.php(18): Sarva\Core\Router->dispatch('GET', '/admin/patients')
+#4 {main}
+  thrown in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php on line 97
+[07-Sep-2026 10:54:36 Asia/Tehran] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'ydlknymz_sarva.patient_visits' doesn't exist in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php:97
+Stack trace:
+#0 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php(97): PDO->prepare('SELECT p.*,\n   ...')
+#1 /home3/ydlknymz/sarvadentalclinic.ir/admin/crm-routes.php(35): Sarva\Services\PatientCrmService->search(Array, 1)
+#2 /home3/ydlknymz/sarvadentalclinic.ir/src/Core/Router.php(54): {closure:/home3/ydlknymz/sarvadentalclinic.ir/admin/crm-routes.php:22}()
+#3 /home3/ydlknymz/sarvadentalclinic.ir/public/index.php(18): Sarva\Core\Router->dispatch('GET', '/admin/patients')
+#4 {main}
+  thrown in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientCrmService.php on line 97
+[07-Sep-2026 10:59:39 Asia/Tehran] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'ydlknymz_sarva.services' doesn't exist in /home3/ydlknymz/sarvadentalclinic.ir/admin/crm-routes.php:37
+Stack trace:
+#0 /home3/ydlknymz/sarvadentalclinic.ir/admin/crm-routes.php(37): PDO->query('SELECT id, name...')
+#1 /home3/ydlknymz/sarvadentalclinic.ir/src/Core/Router.php(54): {closure:/home3/ydlknymz/sarvadentalclinic.ir/admin/crm-routes.php:22}()
+#2 /home3/ydlknymz/sarvadentalclinic.ir/public/index.php(18): Sarva\Core\Router->dispatch('GET', '/admin/patients')
+#3 {main}
+  thrown in /home3/ydlknymz/sarvadentalclinic.ir/admin/crm-routes.php on line 37
+[21-Sep-2026 09:44:08 Asia/Tehran] PHP Fatal error:  Maximum execution time of 60 seconds exceeded in /home3/ydlknymz/sarvadentalclinic.ir/vendor/phpoffice/phpspreadsheet/src/PhpSpreadsheet/Calculation/Calculation.php on line 5403
+[21-Sep-2026 09:45:15 Asia/Tehran] PHP Fatal error:  Maximum execution time of 60 seconds exceeded in /home3/ydlknymz/sarvadentalclinic.ir/vendor/phpoffice/phpspreadsheet/src/PhpSpreadsheet/Calculation/Functions.php on line 222
+[21-Sep-2026 09:46:31 Asia/Tehran] PHP Fatal error:  Maximum execution time of 60 seconds exceeded in /home3/ydlknymz/sarvadentalclinic.ir/vendor/phpoffice/phpspreadsheet/src/PhpSpreadsheet/Calculation/Functions.php on line 282
+[21-Sep-2026 09:48:04 Asia/Tehran] PHP Fatal error:  Maximum execution time of 60 seconds exceeded in /home3/ydlknymz/sarvadentalclinic.ir/vendor/phpoffice/phpspreadsheet/src/PhpSpreadsheet/Calculation/Functions.php on line 222
+[21-Sep-2026 10:06:04 Asia/Tehran] PHP Fatal error:  Maximum execution time of 60 seconds exceeded in /home3/ydlknymz/sarvadentalclinic.ir/vendor/phpoffice/phpspreadsheet/src/PhpSpreadsheet/Calculation/Functions.php on line 219
+[21-Sep-2026 16:36:06 Asia/Tehran] PHP Fatal error:  Maximum execution time of 60 seconds exceeded in /home3/ydlknymz/sarvadentalclinic.ir/vendor/phpoffice/phpspreadsheet/src/PhpSpreadsheet/Worksheet/Validations.php on line 18
+[23-Sep-2026 11:33:44 Asia/Tehran] PHP Fatal error:  Maximum execution time of 60 seconds exceeded in /home3/ydlknymz/sarvadentalclinic.ir/vendor/phpoffice/phpspreadsheet/src/PhpSpreadsheet/Calculation/Functions.php on line 219
+[23-Sep-2026 11:41:42 Asia/Tehran] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'row_number, match_type, existing_patient_id, excel_json, existing_json, status)
+' at line 1 in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php:260
+Stack trace:
+#0 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php(260): PDO->prepare('INSERT INTO exc...')
+#1 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php(154): Sarva\Services\PatientImportService->run('/home3/ydlknymz...', 0, Array, 'add_new', 4, false)
+#2 /home3/ydlknymz/sarvadentalclinic.ir/admin/routes.php(902): Sarva\Services\PatientImportService->import(4, '/home3/ydlknymz...', 0, Array, 'add_new')
+#3 /home3/ydlknymz/sarvadentalclinic.ir/src/Core/Router.php(54): {closure:/home3/ydlknymz/sarvadentalclinic.ir/admin/routes.php:861}('4')
+#4 /home3/ydlknymz/sarvadentalclinic.ir/public/index.php(18): Sarva\Core\Router->dispatch('POST', '/admin/imports/...')
+#5 {main}
+  thrown in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php on line 260
+[23-Sep-2026 11:41:47 Asia/Tehran] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'row_number, match_type, existing_patient_id, excel_json, existing_json, status)
+' at line 1 in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php:260
+Stack trace:
+#0 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php(260): PDO->prepare('INSERT INTO exc...')
+#1 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php(154): Sarva\Services\PatientImportService->run('/home3/ydlknymz...', 0, Array, 'add_new', 4, false)
+#2 /home3/ydlknymz/sarvadentalclinic.ir/admin/routes.php(902): Sarva\Services\PatientImportService->import(4, '/home3/ydlknymz...', 0, Array, 'add_new')
+#3 /home3/ydlknymz/sarvadentalclinic.ir/src/Core/Router.php(54): {closure:/home3/ydlknymz/sarvadentalclinic.ir/admin/routes.php:861}('4')
+#4 /home3/ydlknymz/sarvadentalclinic.ir/public/index.php(18): Sarva\Core\Router->dispatch('POST', '/admin/imports/...')
+#5 {main}
+  thrown in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php on line 260
+[23-Sep-2026 11:42:04 Asia/Tehran] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'row_number, match_type, existing_patient_id, excel_json, existing_json, status)
+' at line 1 in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php:260
+Stack trace:
+#0 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php(260): PDO->prepare('INSERT INTO exc...')
+#1 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php(154): Sarva\Services\PatientImportService->run('/home3/ydlknymz...', 0, Array, 'add_new', 4, false)
+#2 /home3/ydlknymz/sarvadentalclinic.ir/admin/routes.php(902): Sarva\Services\PatientImportService->import(4, '/home3/ydlknymz...', 0, Array, 'add_new')
+#3 /home3/ydlknymz/sarvadentalclinic.ir/src/Core/Router.php(54): {closure:/home3/ydlknymz/sarvadentalclinic.ir/admin/routes.php:861}('4')
+#4 /home3/ydlknymz/sarvadentalclinic.ir/public/index.php(18): Sarva\Core\Router->dispatch('POST', '/admin/imports/...')
+#5 {main}
+  thrown in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php on line 260
+[23-Sep-2026 11:42:21 Asia/Tehran] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'row_number, match_type, existing_patient_id, excel_json, existing_json, status)
+' at line 1 in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php:260
+Stack trace:
+#0 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php(260): PDO->prepare('INSERT INTO exc...')
+#1 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php(154): Sarva\Services\PatientImportService->run('/home3/ydlknymz...', 0, Array, 'review_changes', 4, false)
+#2 /home3/ydlknymz/sarvadentalclinic.ir/admin/routes.php(902): Sarva\Services\PatientImportService->import(4, '/home3/ydlknymz...', 0, Array, 'review_changes')
+#3 /home3/ydlknymz/sarvadentalclinic.ir/src/Core/Router.php(54): {closure:/home3/ydlknymz/sarvadentalclinic.ir/admin/routes.php:861}('4')
+#4 /home3/ydlknymz/sarvadentalclinic.ir/public/index.php(18): Sarva\Core\Router->dispatch('POST', '/admin/imports/...')
+#5 {main}
+  thrown in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php on line 260
+[23-Sep-2026 11:43:09 Asia/Tehran] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'row_number, match_type, existing_patient_id, excel_json, existing_json, status)
+' at line 1 in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php:260
+Stack trace:
+#0 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php(260): PDO->prepare('INSERT INTO exc...')
+#1 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php(154): Sarva\Services\PatientImportService->run('/home3/ydlknymz...', 0, Array, 'add_new', 4, false)
+#2 /home3/ydlknymz/sarvadentalclinic.ir/admin/routes.php(902): Sarva\Services\PatientImportService->import(4, '/home3/ydlknymz...', 0, Array, 'add_new')
+#3 /home3/ydlknymz/sarvadentalclinic.ir/src/Core/Router.php(54): {closure:/home3/ydlknymz/sarvadentalclinic.ir/admin/routes.php:861}('4')
+#4 /home3/ydlknymz/sarvadentalclinic.ir/public/index.php(18): Sarva\Core\Router->dispatch('POST', '/admin/imports/...')
+#5 {main}
+  thrown in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php on line 260
+[23-Sep-2026 11:43:24 Asia/Tehran] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'row_number, match_type, existing_patient_id, excel_json, existing_json, status)
+' at line 1 in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php:260
+Stack trace:
+#0 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php(260): PDO->prepare('INSERT INTO exc...')
+#1 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php(154): Sarva\Services\PatientImportService->run('/home3/ydlknymz...', 0, Array, 'review_changes', 4, false)
+#2 /home3/ydlknymz/sarvadentalclinic.ir/admin/routes.php(902): Sarva\Services\PatientImportService->import(4, '/home3/ydlknymz...', 0, Array, 'review_changes')
+#3 /home3/ydlknymz/sarvadentalclinic.ir/src/Core/Router.php(54): {closure:/home3/ydlknymz/sarvadentalclinic.ir/admin/routes.php:861}('4')
+#4 /home3/ydlknymz/sarvadentalclinic.ir/public/index.php(18): Sarva\Core\Router->dispatch('POST', '/admin/imports/...')
+#5 {main}
+  thrown in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php on line 260
+[23-Sep-2026 11:43:32 Asia/Tehran] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'row_number, match_type, existing_patient_id, excel_json, existing_json, status)
+' at line 1 in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php:260
+Stack trace:
+#0 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php(260): PDO->prepare('INSERT INTO exc...')
+#1 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php(154): Sarva\Services\PatientImportService->run('/home3/ydlknymz...', 0, Array, 'update_existing', 4, false)
+#2 /home3/ydlknymz/sarvadentalclinic.ir/admin/routes.php(902): Sarva\Services\PatientImportService->import(4, '/home3/ydlknymz...', 0, Array, 'update_existing')
+#3 /home3/ydlknymz/sarvadentalclinic.ir/src/Core/Router.php(54): {closure:/home3/ydlknymz/sarvadentalclinic.ir/admin/routes.php:861}('4')
+#4 /home3/ydlknymz/sarvadentalclinic.ir/public/index.php(18): Sarva\Core\Router->dispatch('POST', '/admin/imports/...')
+#5 {main}
+  thrown in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php on line 260
+[23-Sep-2026 11:45:10 Asia/Tehran] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'row_number, match_type, existing_patient_id, excel_json, existing_json, status)
+' at line 1 in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php:260
+Stack trace:
+#0 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php(260): PDO->prepare('INSERT INTO exc...')
+#1 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php(154): Sarva\Services\PatientImportService->run('/home3/ydlknymz...', 0, Array, 'add_new', 4, false)
+#2 /home3/ydlknymz/sarvadentalclinic.ir/admin/routes.php(902): Sarva\Services\PatientImportService->import(4, '/home3/ydlknymz...', 0, Array, 'add_new')
+#3 /home3/ydlknymz/sarvadentalclinic.ir/src/Core/Router.php(54): {closure:/home3/ydlknymz/sarvadentalclinic.ir/admin/routes.php:861}('4')
+#4 /home3/ydlknymz/sarvadentalclinic.ir/public/index.php(18): Sarva\Core\Router->dispatch('POST', '/admin/imports/...')
+#5 {main}
+  thrown in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php on line 260
+[23-Sep-2026 11:46:07 Asia/Tehran] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'row_number, match_type, existing_patient_id, excel_json, existing_json, status)
+' at line 1 in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php:260
+Stack trace:
+#0 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php(260): PDO->prepare('INSERT INTO exc...')
+#1 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php(154): Sarva\Services\PatientImportService->run('/home3/ydlknymz...', 0, Array, 'add_new', 4, false)
+#2 /home3/ydlknymz/sarvadentalclinic.ir/admin/routes.php(902): Sarva\Services\PatientImportService->import(4, '/home3/ydlknymz...', 0, Array, 'add_new')
+#3 /home3/ydlknymz/sarvadentalclinic.ir/src/Core/Router.php(54): {closure:/home3/ydlknymz/sarvadentalclinic.ir/admin/routes.php:861}('4')
+#4 /home3/ydlknymz/sarvadentalclinic.ir/public/index.php(18): Sarva\Core\Router->dispatch('POST', '/admin/imports/...')
+#5 {main}
+  thrown in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php on line 260
+[23-Sep-2026 12:00:40 Asia/Tehran] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'row_number, match_type, existing_patient_id, excel_json, existing_json, status)
+' at line 1 in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php:260
+Stack trace:
+#0 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php(260): PDO->prepare('INSERT INTO exc...')
+#1 /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php(154): Sarva\Services\PatientImportService->run('/home3/ydlknymz...', 0, Array, 'add_new', 4, false)
+#2 /home3/ydlknymz/sarvadentalclinic.ir/admin/routes.php(902): Sarva\Services\PatientImportService->import(4, '/home3/ydlknymz...', 0, Array, 'add_new')
+#3 /home3/ydlknymz/sarvadentalclinic.ir/src/Core/Router.php(54): {closure:/home3/ydlknymz/sarvadentalclinic.ir/admin/routes.php:861}('4')
+#4 /home3/ydlknymz/sarvadentalclinic.ir/public/index.php(18): Sarva\Core\Router->dispatch('POST', '/admin/imports/...')
+#5 {main}
+  thrown in /home3/ydlknymz/sarvadentalclinic.ir/src/Services/PatientImportService.php on line 260

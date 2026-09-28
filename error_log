@@ -1,0 +1,27 @@
+[07-Sep-2026 10:27:41 Asia/Tehran] PHP Fatal error:  Uncaught RuntimeException: Composer detected issues in your platform: Your Composer dependencies require a PHP version ">= 8.3.0". You are running 8.1.34. in /home3/ydlknymz/sarvadentalclinic.ir/vendor/composer/platform_check.php:26
+Stack trace:
+#0 /home3/ydlknymz/sarvadentalclinic.ir/vendor/composer/autoload_real.php(25): require()
+#1 /home3/ydlknymz/sarvadentalclinic.ir/vendor/autoload.php(22): ComposerAutoloaderInit0723c13dbe27845865003c00560b8477::getLoader()
+#2 /home3/ydlknymz/sarvadentalclinic.ir/includes/bootstrap.php(8): require('/home3/ydlknymz...')
+#3 /home3/ydlknymz/sarvadentalclinic.ir/public/index.php(5): require('/home3/ydlknymz...')
+#4 /home3/ydlknymz/sarvadentalclinic.ir/index.php(10): require('/home3/ydlknymz...')
+#5 {main}
+  thrown in /home3/ydlknymz/sarvadentalclinic.ir/vendor/composer/platform_check.php on line 26
+[07-Sep-2026 10:29:27 Asia/Tehran] PHP Fatal error:  Uncaught RuntimeException: Composer detected issues in your platform: Your Composer dependencies require a PHP version ">= 8.3.0". You are running 8.1.34. in /home3/ydlknymz/sarvadentalclinic.ir/vendor/composer/platform_check.php:26
+Stack trace:
+#0 /home3/ydlknymz/sarvadentalclinic.ir/vendor/composer/autoload_real.php(25): require()
+#1 /home3/ydlknymz/sarvadentalclinic.ir/vendor/autoload.php(22): ComposerAutoloaderInit0723c13dbe27845865003c00560b8477::getLoader()
+#2 /home3/ydlknymz/sarvadentalclinic.ir/includes/bootstrap.php(8): require('/home3/ydlknymz...')
+#3 /home3/ydlknymz/sarvadentalclinic.ir/public/index.php(5): require('/home3/ydlknymz...')
+#4 /home3/ydlknymz/sarvadentalclinic.ir/index.php(10): require('/home3/ydlknymz...')
+#5 {main}
+  thrown in /home3/ydlknymz/sarvadentalclinic.ir/vendor/composer/platform_check.php on line 26
+[07-Sep-2026 10:31:15 Asia/Tehran] PHP Fatal error:  Uncaught RuntimeException: Composer detected issues in your platform: Your Composer dependencies require a PHP version ">= 8.3.0". You are running 8.1.34. in /home3/ydlknymz/sarvadentalclinic.ir/vendor/composer/platform_check.php:26
+Stack trace:
+#0 /home3/ydlknymz/sarvadentalclinic.ir/vendor/composer/autoload_real.php(25): require()
+#1 /home3/ydlknymz/sarvadentalclinic.ir/vendor/autoload.php(22): ComposerAutoloaderInit0723c13dbe27845865003c00560b8477::getLoader()
+#2 /home3/ydlknymz/sarvadentalclinic.ir/includes/bootstrap.php(8): require('/home3/ydlknymz...')
+#3 /home3/ydlknymz/sarvadentalclinic.ir/public/index.php(5): require('/home3/ydlknymz...')
+#4 /home3/ydlknymz/sarvadentalclinic.ir/index.php(10): require('/home3/ydlknymz...')
+#5 {main}
+  thrown in /home3/ydlknymz/sarvadentalclinic.ir/vendor/composer/platform_check.php on line 26
