@@ -10,6 +10,7 @@ declare(strict_types=1);
 require dirname(__DIR__) . '/vendor/autoload.php';
 
 use Dotenv\Dotenv;
+use Sarva\Services\SmsService;
 use Sarva\Services\SmsTemplateRenderer;
 
 $root = dirname(__DIR__);
@@ -78,9 +79,18 @@ assert_eq(
 );
 
 $confirmId = (int) ($_ENV['SMSIR_APPOINTMENT_CONFIRMATION_TEMPLATE_ID'] ?? 0);
+$reminderId = (int) ($_ENV['SMSIR_APPOINTMENT_REMINDER_TEMPLATE_ID'] ?? 0);
 $cancelId = (int) ($_ENV['SMSIR_APPOINTMENT_CANCELLATION_TEMPLATE_ID'] ?? 0);
 assert_eq('env confirmation template', 159898, $confirmId);
+assert_eq('env reminder template', 822711, $reminderId);
 assert_eq('env cancellation template', 296200, $cancelId);
+assert_true('reminder != confirmation', $reminderId !== $confirmId);
+assert_true('reminder != cancellation', $reminderId !== $cancelId);
+
+$mappedReminder = SmsService::smsIrTemplateIdForMessageType('appointment_reminder');
+assert_eq('mapped reminder via SmsService', 822711, $mappedReminder);
+assert_eq('mapped confirmation via SmsService', 159898, SmsService::smsIrTemplateIdForMessageType('appointment_confirmation'));
+assert_eq('mapped cancellation via SmsService', 296200, SmsService::smsIrTemplateIdForMessageType('appointment_cancellation'));
 
 $jalaliDate = to_jalali('2026-10-02 18:30:00', 'Y/m/d');
 assert_eq('params date matches to_jalali', $jalaliDate, $params['APPOINTMENT_DATE']);
@@ -88,6 +98,6 @@ assert_eq('expected sample date', '1405/07/10', $params['APPOINTMENT_DATE']);
 
 echo "\nMapped SMS.ir params:\n";
 echo json_encode($params, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . "\n";
-echo "Confirm template ID: {$confirmId}\nCancel template ID: {$cancelId}\n";
+echo "Confirm template ID: {$confirmId}\nReminder template ID: {$reminderId}\nCancel template ID: {$cancelId}\n";
 echo "\n{$passed} passed, {$failed} failed\n";
 exit($failed > 0 ? 1 : 0);

@@ -23,7 +23,7 @@ final class AppointmentTomorrowReminderService
 
     public function templateId(): int
     {
-        return (int) config('sms.appointment_reminder_template_id', 0);
+        return SmsService::smsIrTemplateIdForMessageType(self::MESSAGE_TYPE);
     }
 
     public function isConfigured(): bool
@@ -109,21 +109,60 @@ final class AppointmentTomorrowReminderService
             }
 
             try {
-                $queueId = $this->sms->enqueue([
+                $params = [
+                    'FULL_NAME' => $fullName,
+                    'APPOINTMENT_TIME' => $apptTime,
+                ];
+                // Include date for logging/preview; dispatch strips to reminder-required params.
+                $fullParams = SmsTemplateRenderer::buildSmsIrAppointmentParameters($row, $row);
+                $params['FULL_NAME'] = $fullParams['FULL_NAME'] !== '' ? $fullParams['FULL_NAME'] : $fullName;
+                $params['APPOINTMENT_TIME'] = $fullParams['APPOINTMENT_TIME'] !== '' ? $fullParams['APPOINTMENT_TIME'] : $apptTime;
+                $params['APPOINTMENT_DATE'] = $fullParams['APPOINTMENT_DATE'];
+
+                $idem = $this->idempotencyKey($appointmentId, (string) $row['starts_at']);
+                $legacyIdem = 'tomorrow_reminder:' . $appointmentId . ':' . date('Y-m-d', strtotime((string) $row['starts_at']) ?: time());
+                try {
+                    $dup = $this->db->prepare(
+                        "SELECT id FROM sms_queue WHERE idempotency_key IN (?,?) AND status IN ('pending','processing','retrying','sent') LIMIT 1"
+                    );
+                    $dup->execute([$idem, $legacyIdem]);
+                    if ($dup->fetchColumn()) {
+                        $report['skipped']++;
+                        $entry['status'] = 'duplicate_or_skipped';
+                        $this->logLine('skip_duplicate', $appointmentId, $mobile);
+                        $report['rows'][] = $entry;
+                        continue;
+                    }
+                } catch (\Throwable) {
+                }
+
+                $queueId = $this->sms->enqueueSmsIrTemplate([
                     'patient_id' => (int) $row['patient_id'],
                     'appointment_id' => $appointmentId,
                     'mobile' => $mobile,
-                    'message' => $preview,
                     'message_type' => self::MESSAGE_TYPE,
                     'source' => self::SOURCE,
-                    'idempotency_key' => $this->idempotencyKey($appointmentId, (string) $row['starts_at']),
+                    'provider_template_id' => $this->templateId(),
+                    'template_parameters' => $params,
+                    'idempotency_key' => $idem,
                     'appointment_starts_at' => $row['starts_at'],
+                    'log_message' => $preview,
                 ]);
                 if ($queueId > 0) {
                     $report['queued']++;
                     $entry['status'] = 'queued';
                     $entry['queue_id'] = $queueId;
                     $this->logLine('queued', $appointmentId, $mobile);
+                    SmsTemplateRenderer::logEvent('APPOINTMENT_REMINDER_QUEUED', [
+                        'appointment_id' => $appointmentId,
+                        'rule_id' => null,
+                        'reminder_type' => 'tomorrow',
+                        'appointment_starts_at' => $row['starts_at'],
+                        'current_time' => date('c'),
+                        'template_id' => $this->templateId(),
+                        'idempotency_key' => $idem,
+                        'reason_due' => 'starts_at_date_is_tomorrow',
+                    ]);
                 } else {
                     $report['skipped']++;
                     $entry['status'] = 'duplicate_or_skipped';
@@ -145,7 +184,8 @@ final class AppointmentTomorrowReminderService
     public function idempotencyKey(int $appointmentId, string $startsAt): string
     {
         $day = date('Y-m-d', strtotime($startsAt) ?: time());
-        return 'tomorrow_reminder:' . $appointmentId . ':' . $day;
+        // Distinct from confirmation/cancellation; includes reminder_type + day.
+        return 'appointment_reminder:' . $appointmentId . ':tomorrow:' . $day;
     }
 
     /**

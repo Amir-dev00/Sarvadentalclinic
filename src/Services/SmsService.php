@@ -60,18 +60,21 @@ final class SmsService
         foreach ((array) ($job['template_parameters'] ?? []) as $k => $v) {
             $params[(string) $k] = trim((string) $v);
         }
-        $missing = SmsTemplateRenderer::missingSmsIrParameters($params);
+        $messageType = (string) ($job['message_type'] ?? 'general');
+        $requiredParams = $messageType === 'appointment_reminder'
+            ? ['FULL_NAME', 'APPOINTMENT_TIME']
+            : ['FULL_NAME', 'APPOINTMENT_DATE', 'APPOINTMENT_TIME'];
+        $missing = SmsTemplateRenderer::missingSmsIrParameters($params, $requiredParams);
         if ($missing !== []) {
             SmsTemplateRenderer::logSmsIrParameterError([
                 'template_id' => $templateId,
                 'appointment_id' => !empty($job['appointment_id']) ? (int) $job['appointment_id'] : null,
-                'message_type' => (string) ($job['message_type'] ?? ''),
+                'message_type' => $messageType,
                 'missing_parameter_names' => $missing,
             ]);
             return 0;
         }
 
-        $messageType = (string) ($job['message_type'] ?? 'general');
         $summary = trim((string) ($job['log_message'] ?? ''));
         if ($summary === '') {
             $summary = sprintf(
@@ -86,6 +89,8 @@ final class SmsService
         return $this->enqueue([
             'patient_id' => $job['patient_id'] ?? null,
             'appointment_id' => $job['appointment_id'] ?? null,
+            'template_id' => $job['template_id'] ?? null,
+            'automation_rule_id' => $job['automation_rule_id'] ?? null,
             'admin_user_id' => $job['admin_user_id'] ?? null,
             'mobile' => $mobile,
             'message' => $summary,
@@ -552,6 +557,29 @@ final class SmsService
     }
 
     /**
+     * Resolve SMS.ir Verify template ID strictly by message_type.
+     * Never falls back across confirmation / reminder / cancellation.
+     */
+    public static function smsIrTemplateIdForMessageType(string $messageType): int
+    {
+        return match ($messageType) {
+            'appointment_confirmation' => (int) (
+                config('sms.appointment_confirmation_template_id', 0)
+                ?: ($_ENV['SMSIR_APPOINTMENT_CONFIRMATION_TEMPLATE_ID'] ?? getenv('SMSIR_APPOINTMENT_CONFIRMATION_TEMPLATE_ID') ?: 0)
+            ),
+            'appointment_cancellation' => (int) (
+                config('sms.appointment_cancellation_template_id', 0)
+                ?: ($_ENV['SMSIR_APPOINTMENT_CANCELLATION_TEMPLATE_ID'] ?? getenv('SMSIR_APPOINTMENT_CANCELLATION_TEMPLATE_ID') ?: 0)
+            ),
+            'appointment_reminder' => (int) (
+                config('sms.appointment_reminder_template_id', 0)
+                ?: ($_ENV['SMSIR_APPOINTMENT_REMINDER_TEMPLATE_ID'] ?? getenv('SMSIR_APPOINTMENT_REMINDER_TEMPLATE_ID') ?: 0)
+            ),
+            default => 0,
+        };
+    }
+
+    /**
      * Deliver via SMS.ir verify template when configured for reminder/confirmation/cancellation.
      *
      * @param array<string, mixed> $row
@@ -566,66 +594,9 @@ final class SmsService
     ): array {
         $mobile = (string) $row['mobile'];
         $type = (string) ($row['message_type'] ?? 'general');
-        $sendMode = (string) ($row['send_mode'] ?? 'text');
 
-        // Prefer stored SMS.ir template job payload
-        if ($sendMode === 'smsir_template' || in_array($type, ['appointment_confirmation', 'appointment_cancellation'], true)) {
-            $templateId = (int) ($row['provider_template_id'] ?? 0);
-            if ($templateId <= 0) {
-                $templateId = match ($type) {
-                    'appointment_confirmation' => (int) config('sms.appointment_confirmation_template_id', 0),
-                    'appointment_cancellation' => (int) config('sms.appointment_cancellation_template_id', 0),
-                    default => 0,
-                };
-            }
-
-            $paramsAssoc = $this->resolveTemplateParameters($row, $appointment);
-            if ($templateId > 0) {
-                $missing = SmsTemplateRenderer::missingSmsIrParameters($paramsAssoc);
-                if ($missing !== []) {
-                    SmsTemplateRenderer::logSmsIrParameterError([
-                        'template_id' => $templateId,
-                        'appointment_id' => !empty($row['appointment_id']) ? (int) $row['appointment_id'] : null,
-                        'missing_parameter_names' => $missing,
-                        'message_type' => $type,
-                    ]);
-                    return [
-                        'ok' => false,
-                        'provider' => SmsManager::driver(),
-                        'error' => 'پارامترهای قالب SMS.ir ناقص است: ' . implode(',', $missing),
-                        'permanent' => true,
-                        'message_channel' => 'verify',
-                        'provider_template_id' => $templateId,
-                    ];
-                }
-
-                $result = $provider->sendTemplate(
-                    $mobile,
-                    $templateId,
-                    SmsTemplateRenderer::toSmsIrParameterList($paramsAssoc)
-                );
-                $result['provider_template_id'] = $templateId;
-                $result['message_channel'] = $result['message_channel'] ?? 'verify';
-                return $result;
-            }
-        }
-
-        $reminderTemplateId = (int) config('sms.appointment_reminder_template_id', 0);
-        if ($type === 'appointment_reminder' && $reminderTemplateId > 0 && $appointment) {
-            $fullName = trim((string) ($appointment['first_name'] ?? '') . ' ' . (string) ($appointment['last_name'] ?? ''));
-            if ($fullName === '') {
-                $fullName = 'مراجع';
-            }
-            $apptTime = date('H:i', strtotime((string) ($appointment['starts_at'] ?? '')) ?: time());
-
-            return $provider->sendTemplate($mobile, $reminderTemplateId, [
-                ['name' => 'FULL_NAME', 'value' => $fullName],
-                ['name' => 'APPOINTMENT_TIME', 'value' => $apptTime],
-            ]);
-        }
-
-        if ($type === 'appointment_reminder') {
-            return $provider->sendAppointmentReminder($mobile, $message);
+        if (in_array($type, ['appointment_confirmation', 'appointment_cancellation', 'appointment_reminder'], true)) {
+            return $this->dispatchAppointmentTemplate($provider, $row, $appointment, $type, $mobile);
         }
 
         return $provider->sendMessage($mobile, $message);
@@ -634,9 +605,114 @@ final class SmsService
     /**
      * @param array<string, mixed> $row
      * @param array<string, mixed>|null $appointment
+     * @return array<string, mixed>
+     */
+    private function dispatchAppointmentTemplate(
+        \Sarva\Interfaces\SmsProviderInterface $provider,
+        array $row,
+        ?array $appointment,
+        string $type,
+        string $mobile
+    ): array {
+        $expectedId = self::smsIrTemplateIdForMessageType($type);
+        $storedId = (int) ($row['provider_template_id'] ?? 0);
+
+        // Always prefer the config ID for this message_type. Never use another type's template.
+        $templateId = $expectedId;
+        if ($templateId <= 0 && $storedId > 0) {
+            $belongsToOtherType = false;
+            foreach (['appointment_confirmation', 'appointment_cancellation', 'appointment_reminder'] as $otherType) {
+                if ($otherType === $type) {
+                    continue;
+                }
+                $otherId = self::smsIrTemplateIdForMessageType($otherType);
+                if ($otherId > 0 && $storedId === $otherId) {
+                    $belongsToOtherType = true;
+                    break;
+                }
+            }
+            if (!$belongsToOtherType) {
+                $templateId = $storedId;
+            }
+        }
+
+        if ($templateId <= 0) {
+            $event = match ($type) {
+                'appointment_confirmation' => 'smsir_confirmation_template_missing',
+                'appointment_cancellation' => 'smsir_cancellation_template_missing',
+                default => 'smsir_reminder_template_missing',
+            };
+            SmsTemplateRenderer::logEvent($event, [
+                'message_type' => $type,
+                'appointment_id' => !empty($row['appointment_id']) ? (int) $row['appointment_id'] : null,
+                'queue_id' => !empty($row['id']) ? (int) $row['id'] : null,
+                'stored_provider_template_id' => $storedId ?: null,
+            ]);
+            return [
+                'ok' => false,
+                'provider' => SmsManager::driver(),
+                'error' => 'شناسه قالب SMS.ir برای ' . $type . ' تنظیم نشده است.',
+                'permanent' => true,
+                'message_channel' => 'verify',
+                'event' => $event,
+            ];
+        }
+
+        if ($storedId > 0 && $expectedId > 0 && $storedId !== $expectedId) {
+            SmsTemplateRenderer::logEvent('smsir_template_id_mismatch_corrected', [
+                'message_type' => $type,
+                'appointment_id' => !empty($row['appointment_id']) ? (int) $row['appointment_id'] : null,
+                'stored_provider_template_id' => $storedId,
+                'expected_provider_template_id' => $expectedId,
+            ]);
+        }
+
+        $paramsAssoc = $this->resolveTemplateParametersForType($type, $row, $appointment);
+        $required = $type === 'appointment_reminder'
+            ? ['FULL_NAME', 'APPOINTMENT_TIME']
+            : ['FULL_NAME', 'APPOINTMENT_DATE', 'APPOINTMENT_TIME'];
+        $missing = SmsTemplateRenderer::missingSmsIrParameters($paramsAssoc, $required);
+        if ($missing !== []) {
+            SmsTemplateRenderer::logSmsIrParameterError([
+                'template_id' => $templateId,
+                'appointment_id' => !empty($row['appointment_id']) ? (int) $row['appointment_id'] : null,
+                'missing_parameter_names' => $missing,
+                'message_type' => $type,
+            ]);
+            return [
+                'ok' => false,
+                'provider' => SmsManager::driver(),
+                'error' => 'پارامترهای قالب SMS.ir ناقص است: ' . implode(',', $missing),
+                'permanent' => true,
+                'message_channel' => 'verify',
+                'provider_template_id' => $templateId,
+            ];
+        }
+
+        // Reminder template only needs FULL_NAME + APPOINTMENT_TIME
+        if ($type === 'appointment_reminder') {
+            $paramsAssoc = [
+                'FULL_NAME' => $paramsAssoc['FULL_NAME'],
+                'APPOINTMENT_TIME' => $paramsAssoc['APPOINTMENT_TIME'],
+            ];
+        }
+
+        $result = $provider->sendTemplate(
+            $mobile,
+            $templateId,
+            SmsTemplateRenderer::toSmsIrParameterList($paramsAssoc)
+        );
+        $result['provider_template_id'] = $templateId;
+        $result['message_channel'] = $result['message_channel'] ?? 'verify';
+        return $result;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @param array<string, mixed>|null $appointment
      * @return array<string, string>
      */
-    private function resolveTemplateParameters(array $row, ?array $appointment): array
+    private function resolveTemplateParametersForType(string $type, array $row, ?array $appointment): array
     {
         $fromJson = [];
         $raw = $row['template_parameters_json'] ?? null;
@@ -648,20 +724,21 @@ final class SmsService
                 }
             }
         }
-        if (
-            trim((string) ($fromJson['FULL_NAME'] ?? '')) !== ''
-            && trim((string) ($fromJson['APPOINTMENT_DATE'] ?? '')) !== ''
-            && trim((string) ($fromJson['APPOINTMENT_TIME'] ?? '')) !== ''
-        ) {
-            return [
-                'FULL_NAME' => $fromJson['FULL_NAME'],
-                'APPOINTMENT_DATE' => $fromJson['APPOINTMENT_DATE'],
-                'APPOINTMENT_TIME' => $fromJson['APPOINTMENT_TIME'],
-            ];
-        }
 
         if ($appointment) {
-            return SmsTemplateRenderer::buildSmsIrAppointmentParameters($appointment, $appointment);
+            $built = SmsTemplateRenderer::buildSmsIrAppointmentParameters($appointment, $appointment);
+            // Prefer explicit queued params when present; fill gaps from appointment.
+            return [
+                'FULL_NAME' => trim((string) ($fromJson['FULL_NAME'] ?? '')) !== ''
+                    ? $fromJson['FULL_NAME']
+                    : $built['FULL_NAME'],
+                'APPOINTMENT_DATE' => trim((string) ($fromJson['APPOINTMENT_DATE'] ?? '')) !== ''
+                    ? $fromJson['APPOINTMENT_DATE']
+                    : $built['APPOINTMENT_DATE'],
+                'APPOINTMENT_TIME' => trim((string) ($fromJson['APPOINTMENT_TIME'] ?? '')) !== ''
+                    ? $fromJson['APPOINTMENT_TIME']
+                    : $built['APPOINTMENT_TIME'],
+            ];
         }
 
         return [

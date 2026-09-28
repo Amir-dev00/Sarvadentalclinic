@@ -167,7 +167,7 @@ final class AppointmentService
     }
 
     /**
-     * Admin-created appointment: status=confirmed so SMS reminder automation includes it automatically.
+     * Admin-created appointment: status=confirmed. Queues confirmation SMS only (never reminder).
      *
      * @return array{ok:bool, message?:string, appointment_id?:int}
      */
@@ -283,12 +283,11 @@ final class AppointmentService
     private function enqueueConfirmationSms(int $appointmentId): void
     {
         try {
-            $templateId = (int) config('sms.appointment_confirmation_template_id', 0);
+            $templateId = SmsService::smsIrTemplateIdForMessageType('appointment_confirmation');
             if ($templateId <= 0) {
-                SmsTemplateRenderer::logSmsIrParameterError([
+                SmsTemplateRenderer::logEvent('smsir_confirmation_template_missing', [
                     'appointment_id' => $appointmentId,
                     'message_type' => 'appointment_confirmation',
-                    'missing_parameter_names' => ['SMSIR_APPOINTMENT_CONFIRMATION_TEMPLATE_ID'],
                 ]);
                 return;
             }
@@ -320,8 +319,34 @@ final class AppointmentService
                 return;
             }
 
+            $idempotencyKey = 'appointment_confirmation:' . $appointmentId;
             $sms = new SmsService($this->db);
-            $sms->enqueueSmsIrTemplate([
+
+            // Block legacy confirm:{id} duplicates from older releases
+            try {
+                $legacy = $this->db->prepare(
+                    "SELECT id FROM sms_queue WHERE idempotency_key IN (?, ?) AND status IN ('pending','processing','retrying','sent') LIMIT 1"
+                );
+                $legacy->execute([$idempotencyKey, 'confirm:' . $appointmentId]);
+                if ($legacy->fetchColumn()) {
+                    SmsTemplateRenderer::logEvent('APPOINTMENT_CONFIRMATION_SKIPPED_DUPLICATE', [
+                        'appointment_id' => $appointmentId,
+                        'template_id' => $templateId,
+                        'idempotency_key' => $idempotencyKey,
+                    ]);
+                    return;
+                }
+                $legacyLog = $this->db->prepare(
+                    "SELECT id FROM sms_logs WHERE idempotency_key IN (?, ?) AND status='sent' LIMIT 1"
+                );
+                $legacyLog->execute([$idempotencyKey, 'confirm:' . $appointmentId]);
+                if ($legacyLog->fetchColumn()) {
+                    return;
+                }
+            } catch (\Throwable) {
+            }
+
+            $qid = $sms->enqueueSmsIrTemplate([
                 'patient_id' => (int) $data['patient_id'],
                 'appointment_id' => $appointmentId,
                 'mobile' => (string) $data['mobile'],
@@ -329,7 +354,7 @@ final class AppointmentService
                 'source' => 'automation',
                 'provider_template_id' => $templateId,
                 'template_parameters' => $params,
-                'idempotency_key' => 'confirm:' . $appointmentId,
+                'idempotency_key' => $idempotencyKey,
                 'appointment_starts_at' => $data['starts_at'],
                 'log_message' => sprintf(
                     'تأیید نوبت (SMS.ir #%d): %s — %s %s',
@@ -339,7 +364,20 @@ final class AppointmentService
                     $params['APPOINTMENT_TIME']
                 ),
             ]);
-        } catch (\Throwable) {
+
+            SmsTemplateRenderer::logEvent('APPOINTMENT_CONFIRMATION_QUEUED', [
+                'appointment_id' => $appointmentId,
+                'message_type' => 'appointment_confirmation',
+                'template_id' => $templateId,
+                'idempotency_key' => $idempotencyKey,
+                'queue_id' => $qid > 0 ? $qid : null,
+                'queued' => $qid > 0,
+            ]);
+        } catch (\Throwable $e) {
+            SmsTemplateRenderer::logEvent('APPOINTMENT_CONFIRMATION_QUEUE_ERROR', [
+                'appointment_id' => $appointmentId,
+                'error' => mb_substr($e->getMessage(), 0, 200),
+            ]);
         }
     }
 
@@ -695,12 +733,11 @@ final class AppointmentService
         string $startsAtFallback
     ): array {
         try {
-            $templateId = (int) config('sms.appointment_cancellation_template_id', 0);
+            $templateId = SmsService::smsIrTemplateIdForMessageType('appointment_cancellation');
             if ($templateId <= 0) {
-                SmsTemplateRenderer::logSmsIrParameterError([
+                SmsTemplateRenderer::logEvent('smsir_cancellation_template_missing', [
                     'appointment_id' => $appointmentId,
                     'message_type' => 'appointment_cancellation',
-                    'missing_parameter_names' => ['SMSIR_APPOINTMENT_CANCELLATION_TEMPLATE_ID'],
                 ]);
                 $this->logCancel('cancellation_sms_enqueue_failed', [
                     'appointment_id' => $appointmentId,
@@ -754,7 +791,7 @@ final class AppointmentService
             }
 
             // Stable per-appointment key — never send two cancellation templates for one appointment.
-            $idem = 'appointment_cancel:' . $appointmentId;
+            $idem = 'appointment_cancellation:' . $appointmentId;
 
             $qid = (new SmsService($this->db))->enqueueSmsIrTemplate([
                 'patient_id' => (int) $data['patient_id'],
@@ -781,8 +818,21 @@ final class AppointmentService
                     'queue_id' => $qid,
                     'provider_template_id' => $templateId,
                     'history_id' => $historyId,
+                    'idempotency_key' => $idem,
                 ]);
                 return ['queued' => true, 'status' => 'queued', 'queue_id' => $qid];
+            }
+
+            // Also treat legacy appointment_cancel:{id} as already queued
+            try {
+                $legacy = $this->db->prepare(
+                    "SELECT id FROM sms_queue WHERE idempotency_key=? AND status IN ('pending','processing','retrying','sent') LIMIT 1"
+                );
+                $legacy->execute(['appointment_cancel:' . $appointmentId]);
+                if ($legacy->fetchColumn()) {
+                    return ['queued' => false, 'status' => 'already_queued'];
+                }
+            } catch (\Throwable) {
             }
 
             $this->logCancel('cancellation_sms_enqueue_failed', [

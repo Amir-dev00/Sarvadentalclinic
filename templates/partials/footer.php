@@ -21,7 +21,7 @@
                     <div class="footer-opening-hours">
                         <h2>ساعات کاری</h2>
                         <ul>
-                            <?php foreach (preg_split('/\r\n|\r|\n/', (string) setting('working_hours', "شنبه تا پنجشنبه: ۱۰:۰۰ تا ۱۹:۰۰\nجمعه: تعطیل")) as $line): ?>
+                            <?php foreach (preg_split('/\r\n|\r|\n/', (string) setting('working_hours', "شنبه تا پنجشنبه: ۱۰:۰۰ تا ۱۹:۳۰\nجمعه: تعطیل")) as $line): ?>
                                 <?php if (trim($line) !== ''): ?><li><?= e($line) ?></li><?php endif; ?>
                             <?php endforeach; ?>
                         </ul>

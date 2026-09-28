@@ -242,36 +242,80 @@ final class SmsAutomationService
         $stmt->execute($params);
         $count = 0;
         $type = 'appointment_reminder';
+        $smsIrTemplateId = SmsService::smsIrTemplateIdForMessageType($type);
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $key = 'auto:' . (int) $rule['id'] . ':' . (int) $row['id'] . ':' . $type;
-            $rendered = SmsTemplateRenderer::renderForSend(
-                (string) $rule['template_body'],
-                SmsTemplateRenderer::varsFrom($row, $row)
-            );
-            if (!$rendered['ok']) {
-                SmsTemplateRenderer::logRenderError('automation_enqueue', [
+            $key = 'appointment_reminder:' . (int) $row['id'] . ':rule:' . (int) $rule['id'];
+            // Keep legacy key blocked too
+            $legacyKey = 'auto:' . (int) $rule['id'] . ':' . (int) $row['id'] . ':' . $type;
+
+            if ($smsIrTemplateId > 0) {
+                $params = SmsTemplateRenderer::buildSmsIrAppointmentParameters($row, $row);
+                $missing = SmsTemplateRenderer::missingSmsIrParameters($params, ['FULL_NAME', 'APPOINTMENT_TIME']);
+                if ($missing !== []) {
+                    SmsTemplateRenderer::logSmsIrParameterError([
+                        'template_id' => $smsIrTemplateId,
+                        'template_slug' => (string) ($rule['template_slug'] ?? ''),
+                        'automation_rule_id' => (int) $rule['id'],
+                        'appointment_id' => (int) $row['id'],
+                        'missing_parameter_names' => $missing,
+                        'message_type' => $type,
+                    ]);
+                    continue;
+                }
+                // Skip if legacy already queued
+                try {
+                    $dup = $this->db->prepare(
+                        "SELECT id FROM sms_queue WHERE idempotency_key IN (?,?) AND status IN ('pending','processing','retrying','sent') LIMIT 1"
+                    );
+                    $dup->execute([$key, $legacyKey]);
+                    if ($dup->fetchColumn()) {
+                        continue;
+                    }
+                } catch (\Throwable) {
+                }
+
+                $id = $this->sms->enqueueSmsIrTemplate([
+                    'patient_id' => (int) $row['patient_id'],
+                    'appointment_id' => (int) $row['id'],
                     'template_id' => (int) $rule['template_id'],
-                    'template_slug' => (string) ($rule['template_slug'] ?? ''),
+                    'automation_rule_id' => (int) $rule['id'],
+                    'mobile' => (string) $row['mobile'],
+                    'message_type' => $type,
+                    'source' => 'automation',
+                    'provider_template_id' => $smsIrTemplateId,
+                    'template_parameters' => $params,
+                    'idempotency_key' => $key,
+                    'appointment_starts_at' => $row['starts_at'],
+                    'log_message' => sprintf(
+                        'یادآوری نوبت (SMS.ir #%d): %s — %s %s',
+                        $smsIrTemplateId,
+                        $params['FULL_NAME'],
+                        $params['APPOINTMENT_DATE'],
+                        $params['APPOINTMENT_TIME']
+                    ),
+                ]);
+            } else {
+                // No SMS.ir reminder template configured — do not invent another template.
+                SmsTemplateRenderer::logEvent('smsir_reminder_template_missing', [
                     'automation_rule_id' => (int) $rule['id'],
                     'appointment_id' => (int) $row['id'],
-                    'unresolved' => $rendered['unresolved'],
                 ]);
                 continue;
             }
-            $id = $this->sms->enqueue([
-                'patient_id' => (int) $row['patient_id'],
-                'appointment_id' => (int) $row['id'],
-                'template_id' => (int) $rule['template_id'],
-                'automation_rule_id' => (int) $rule['id'],
-                'mobile' => (string) $row['mobile'],
-                'message' => $rendered['message'],
-                'message_type' => $type,
-                'source' => 'automation',
-                'idempotency_key' => $key,
-                'appointment_starts_at' => $row['starts_at'],
-            ]);
+
             if ($id > 0) {
                 $count++;
+                SmsTemplateRenderer::logEvent('APPOINTMENT_REMINDER_QUEUED', [
+                    'appointment_id' => (int) $row['id'],
+                    'rule_id' => (int) $rule['id'],
+                    'appointment_starts_at' => $row['starts_at'],
+                    'current_time' => date('c'),
+                    'template_id' => $smsIrTemplateId,
+                    'idempotency_key' => $key,
+                    'reason_due' => ($rule['offset_unit'] === 'hours')
+                        ? ('within_' . (int) $rule['offset_value'] . '_hours')
+                        : ('date_offset_' . (int) $rule['offset_value'] . '_days'),
+                ]);
             }
         }
         $this->db->prepare('UPDATE sms_automation_rules SET last_enqueued_at=NOW() WHERE id=?')->execute([(int) $rule['id']]);

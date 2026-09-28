@@ -19,6 +19,15 @@ $placeholders = \Sarva\Services\SmsTemplateRenderer::placeholders();
             <code dir="ltr">APPOINTMENT_TIME</code>
         </li>
         <li>
+            <strong>یادآوری نوبت</strong> —
+            قالب SMS.ir
+            <code dir="ltr">#<?= (int) config('sms.appointment_reminder_template_id', 0) ?: 822711 ?></code>
+            · پارامترها:
+            <code dir="ltr">FULL_NAME</code>,
+            <code dir="ltr">APPOINTMENT_TIME</code>
+            · فقط از طریق cron/اتوماسیون یادآوری
+        </li>
+        <li>
             <strong>لغو نوبت</strong> —
             قالب SMS.ir
             <code dir="ltr">#<?= (int) config('sms.appointment_cancellation_template_id', 0) ?: 296200 ?></code>
