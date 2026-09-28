@@ -16,7 +16,7 @@ final class SmsIrProvider implements SmsProviderInterface
 
     /** OTP / verify: fail fast on shared hosting */
     private const OTP_TIMEOUT = 10;
-    private const OTP_CONNECT_TIMEOUT = 3;
+    private const OTP_CONNECT_TIMEOUT = 5;
 
     /** Bulk / non-urgent */
     private const BULK_TIMEOUT = 20;

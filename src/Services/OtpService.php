@@ -7,19 +7,22 @@ namespace Sarva\Services;
 use PDO;
 use Sarva\Sms\SmsManager;
 
+/**
+ * Transactional OTP: immediate SMS.ir Verify send (never sms_queue / cron).
+ */
 final class OtpService
 {
+    private const PURPOSE = 'login';
+
     public function __construct(private readonly PDO $db)
     {
     }
 
     public function request(string $mobile, string $ip): array
     {
-        $t0 = hrtime(true);
-        $this->timingLog('otp_request_received', [
-            'mobile' => $this->maskMobile($mobile),
-            'ip' => $ip !== '' ? $ip : null,
-        ]);
+        $requestId = bin2hex(random_bytes(6));
+        $tReceived = hrtime(true);
+        $receivedAt = date('c');
 
         $mobile = normalize_mobile($mobile);
         if ($mobile === null) {
@@ -31,14 +34,13 @@ final class OtpService
             'SELECT created_at FROM otp_codes WHERE mobile = :m AND purpose = :p AND consumed_at IS NULL
              ORDER BY id DESC LIMIT 1'
         );
-        $stmt->execute(['m' => $mobile, 'p' => 'login']);
+        $stmt->execute(['m' => $mobile, 'p' => self::PURPOSE]);
         $last = $stmt->fetchColumn();
         if ($last && (time() - strtotime((string) $last)) < $cooldown) {
             $wait = $cooldown - (time() - strtotime((string) $last));
             return ['ok' => false, 'message' => "لطفاً {$wait} ثانیه دیگر دوباره تلاش کنید.", 'retry_after' => $wait];
         }
 
-        // Rate limit: max 5 OTP requests per mobile per hour
         $rate = $this->db->prepare(
             'SELECT COUNT(*) FROM otp_codes WHERE mobile = :m AND created_at > (NOW() - INTERVAL 1 HOUR)'
         );
@@ -47,7 +49,6 @@ final class OtpService
             return ['ok' => false, 'message' => 'تعداد درخواست‌ها بیش از حد مجاز است. بعداً تلاش کنید.'];
         }
 
-        // Soft IP rate limit (shared hosting friendly, no Redis)
         if ($ip !== '') {
             $ipRate = $this->db->prepare(
                 'SELECT COUNT(*) FROM otp_codes WHERE ip_address = :ip AND created_at > (NOW() - INTERVAL 1 HOUR)'
@@ -58,18 +59,87 @@ final class OtpService
             }
         }
 
-        // Secure 6-digit OTP — never log / never return in production responses
+        $tGen0 = hrtime(true);
         $code = (string) random_int(100000, 999999);
+        $generateMs = (int) round((hrtime(true) - $tGen0) / 1_000_000);
+        $generatedAt = date('c');
         $ttl = (int) config('app.otp_ttl', 120);
-        // Lower bcrypt cost: OTP is short-lived; default cost was adding unnecessary pre-send delay.
-        $hash = password_hash($code, PASSWORD_BCRYPT, ['cost' => 8]);
 
+        // Send FIRST — do not invalidate a still-valid OTP until provider accepts.
+        $smsStartedAt = date('c');
+        $tSms0 = hrtime(true);
         try {
-            // Invalidate previous unused codes for this mobile so only the latest is valid
+            $sms = SmsManager::make()->sendOtp($mobile, $code);
+        } catch (\Throwable) {
+            $smsApiMs = (int) round((hrtime(true) - $tSms0) / 1_000_000);
+            $totalMs = (int) round((hrtime(true) - $tReceived) / 1_000_000);
+            $this->writeTimingLine([
+                'id' => $requestId,
+                'mobile' => $this->maskMobile($mobile),
+                'request_received_at' => $receivedAt,
+                'otp_generated_at' => $generatedAt,
+                'otp_saved_at' => null,
+                'sms_request_started_at' => $smsStartedAt,
+                'sms_provider_response_at' => date('c'),
+                'request_finished_at' => date('c'),
+                'generate_ms' => $generateMs,
+                'database_ms' => 0,
+                'sms_api_ms' => $smsApiMs,
+                'total_ms' => $totalMs,
+                'provider_status' => 'exception',
+                'queue' => false,
+            ]);
+            $this->logSms($mobile, false, [
+                'ok' => false,
+                'provider' => SmsManager::driver(),
+                'error' => 'ارسال پیامک با خطای غیرمنتظره مواجه شد.',
+                'smsir_api_ms' => $smsApiMs,
+                'app_total_ms' => $totalMs,
+            ]);
+            return ['ok' => false, 'message' => 'ارسال کد تأیید انجام نشد. لطفاً دوباره تلاش کنید.'];
+        }
+
+        $smsApiMs = (int) ($sms['duration_ms'] ?? (int) round((hrtime(true) - $tSms0) / 1_000_000));
+        $smsResponseAt = date('c');
+        $ok = (bool) ($sms['ok'] ?? false);
+
+        if (!$ok) {
+            $totalMs = (int) round((hrtime(true) - $tReceived) / 1_000_000);
+            $this->writeTimingLine([
+                'id' => $requestId,
+                'mobile' => $this->maskMobile($mobile),
+                'request_received_at' => $receivedAt,
+                'otp_generated_at' => $generatedAt,
+                'otp_saved_at' => null,
+                'sms_request_started_at' => $smsStartedAt,
+                'sms_provider_response_at' => $smsResponseAt,
+                'request_finished_at' => date('c'),
+                'generate_ms' => $generateMs,
+                'database_ms' => 0,
+                'sms_api_ms' => $smsApiMs,
+                'total_ms' => $totalMs,
+                'provider_status' => 'failed',
+                'http' => $sms['http'] ?? null,
+                'queue' => false,
+            ]);
+            $this->logSms($mobile, false, $sms + [
+                'smsir_api_ms' => $smsApiMs,
+                'app_total_ms' => $totalMs,
+            ]);
+            return [
+                'ok' => false,
+                'message' => $this->friendlySmsError($sms),
+            ];
+        }
+
+        // Provider accepted — now persist (HMAC is fast for short-lived OTP).
+        $tDb0 = hrtime(true);
+        try {
+            $hash = $this->hashOtp($code, $mobile);
             $this->db->prepare(
                 "UPDATE otp_codes SET consumed_at = NOW()
                  WHERE mobile = :m AND purpose = :p AND consumed_at IS NULL"
-            )->execute(['m' => $mobile, 'p' => 'login']);
+            )->execute(['m' => $mobile, 'p' => self::PURPOSE]);
 
             $ins = $this->db->prepare(
                 'INSERT INTO otp_codes (mobile, code_hash, purpose, max_attempts, expires_at, ip_address)
@@ -77,72 +147,61 @@ final class OtpService
             );
             $ins->bindValue('m', $mobile);
             $ins->bindValue('h', $hash);
-            $ins->bindValue('p', 'login');
+            $ins->bindValue('p', self::PURPOSE);
             $ins->bindValue('max', (int) config('app.otp_max_attempts', 5), PDO::PARAM_INT);
             $ins->bindValue('ttl', $ttl, PDO::PARAM_INT);
             $ins->bindValue('ip', $ip !== '' ? $ip : null);
             $ins->execute();
-            $otpId = (int) $this->db->lastInsertId();
         } catch (\Throwable) {
-            return ['ok' => false, 'message' => 'خطا در آماده‌سازی کد تأیید. دوباره تلاش کنید.'];
+            $databaseMs = (int) round((hrtime(true) - $tDb0) / 1_000_000);
+            $totalMs = (int) round((hrtime(true) - $tReceived) / 1_000_000);
+            $this->writeTimingLine([
+                'id' => $requestId,
+                'mobile' => $this->maskMobile($mobile),
+                'request_received_at' => $receivedAt,
+                'otp_generated_at' => $generatedAt,
+                'otp_saved_at' => null,
+                'sms_request_started_at' => $smsStartedAt,
+                'sms_provider_response_at' => $smsResponseAt,
+                'request_finished_at' => date('c'),
+                'generate_ms' => $generateMs,
+                'database_ms' => $databaseMs,
+                'sms_api_ms' => $smsApiMs,
+                'total_ms' => $totalMs,
+                'provider_status' => 'success_db_failed',
+                'queue' => false,
+            ]);
+            return ['ok' => false, 'message' => 'خطا در ذخیره کد تأیید. دوباره تلاش کنید.'];
         }
 
-        $preSendMs = (int) round((hrtime(true) - $t0) / 1_000_000);
-        $this->timingLog('smsir_api_request_started', [
+        $databaseMs = (int) round((hrtime(true) - $tDb0) / 1_000_000);
+        $savedAt = date('c');
+        $totalMs = (int) round((hrtime(true) - $tReceived) / 1_000_000);
+
+        $this->writeTimingLine([
+            'id' => $requestId,
             'mobile' => $this->maskMobile($mobile),
-            'template_id' => (int) config('sms.otp_template_id', 0),
-            'app_pre_send_ms' => $preSendMs,
-            'via' => 'direct_verify_api',
+            'request_received_at' => $receivedAt,
+            'otp_generated_at' => $generatedAt,
+            'otp_saved_at' => $savedAt,
+            'sms_request_started_at' => $smsStartedAt,
+            'sms_provider_response_at' => $smsResponseAt,
+            'request_finished_at' => date('c'),
+            'generate_ms' => $generateMs,
+            'database_ms' => $databaseMs,
+            'sms_api_ms' => $smsApiMs,
+            'total_ms' => $totalMs,
+            'provider_status' => 'success',
+            'message_id' => $sms['message_id'] ?? null,
             'queue' => false,
         ]);
 
-        try {
-            // IMMEDIATE send — never uses sms_queue / cron.
-            $sms = SmsManager::make()->sendOtp($mobile, $code);
-        } catch (\Throwable) {
-            $this->invalidateOtpRow($otpId);
-            $this->timingLog('smsir_api_exception', [
-                'mobile' => $this->maskMobile($mobile),
-                'app_pre_send_ms' => $preSendMs,
-            ]);
-            $this->logSms($mobile, 'otp', false, [
-                'ok' => false,
-                'provider' => SmsManager::driver(),
-                'error' => 'ارسال پیامک با خطای غیرمنتظره مواجه شد.',
-            ]);
-            return ['ok' => false, 'message' => 'ارسال پیامک ممکن نیست. لطفاً کمی بعد دوباره تلاش کنید.'];
-        }
-
-        $apiMs = (int) ($sms['duration_ms'] ?? 0);
-        $totalMs = (int) round((hrtime(true) - $t0) / 1_000_000);
-        $ok = (bool) ($sms['ok'] ?? false);
-
-        $this->timingLog('smsir_api_response_received', [
-            'mobile' => $this->maskMobile($mobile),
-            'ok' => $ok,
-            'http' => $sms['http'] ?? null,
-            'status_code' => $sms['status_code'] ?? null,
-            'message_id' => $sms['message_id'] ?? null,
-            'app_pre_send_ms' => $preSendMs,
-            'smsir_api_ms' => $apiMs,
+        $this->logSms($mobile, true, $sms + [
+            'smsir_api_ms' => $smsApiMs,
             'app_total_ms' => $totalMs,
-            // If smsir_api_ms is small but phone SMS is late → operator/network after SMS.ir accept
-            'note' => 'Phone delivery after SMS.ir accept is outside our app; compare smsir_api_ms vs user-reported delay.',
+            'database_ms' => $databaseMs,
+            'generate_ms' => $generateMs,
         ]);
-
-        $this->logSms($mobile, 'otp', $ok, $sms + [
-            'app_pre_send_ms' => $preSendMs,
-            'smsir_api_ms' => $apiMs,
-            'app_total_ms' => $totalMs,
-        ]);
-
-        if (!$ok) {
-            $this->invalidateOtpRow($otpId);
-            return [
-                'ok' => false,
-                'message' => $this->friendlySmsError($sms),
-            ];
-        }
 
         $payload = [
             'ok' => true,
@@ -151,7 +210,6 @@ final class OtpService
             'resend_in' => $cooldown,
         ];
 
-        // Dev-only convenience: expose code when using the log driver in debug mode.
         $driver = strtolower((string) (config('sms.driver') ?: ($_ENV['SMS_DRIVER'] ?? 'log')));
         if (config('app.debug') && $driver === 'log') {
             $payload['dev_code'] = $code;
@@ -179,7 +237,7 @@ final class OtpService
 
         try {
             $this->db->beginTransaction();
-            $stmt->execute(['m' => $mobile, 'p' => 'login']);
+            $stmt->execute(['m' => $mobile, 'p' => self::PURPOSE]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$row) {
                 $this->db->rollBack();
@@ -189,7 +247,7 @@ final class OtpService
                 $this->db->prepare('UPDATE otp_codes SET consumed_at = NOW() WHERE id = :id')
                     ->execute(['id' => $row['id']]);
                 $this->db->commit();
-                return ['ok' => false, 'message' => 'کد منقضی شده است.'];
+                return ['ok' => false, 'message' => 'کد تأیید منقضی شده است. کد جدید دریافت کنید.'];
             }
             if ((int) $row['attempts'] >= (int) $row['max_attempts']) {
                 $this->db->prepare('UPDATE otp_codes SET consumed_at = NOW() WHERE id = :id')
@@ -197,7 +255,7 @@ final class OtpService
                 $this->db->commit();
                 return ['ok' => false, 'message' => 'تعداد تلاش‌ها به پایان رسیده است.'];
             }
-            if (!password_verify($code, (string) $row['code_hash'])) {
+            if (!$this->verifyOtpHash($code, $mobile, (string) $row['code_hash'])) {
                 $upd = $this->db->prepare('UPDATE otp_codes SET attempts = attempts + 1 WHERE id = :id');
                 $upd->execute(['id' => $row['id']]);
                 $attempts = (int) $row['attempts'] + 1;
@@ -207,12 +265,11 @@ final class OtpService
                         ->execute(['id' => $row['id']]);
                 }
                 $this->db->commit();
-                return ['ok' => false, 'message' => 'کد واردشده نادرست است.'];
+                return ['ok' => false, 'message' => 'کد واردشده صحیح نیست.'];
             }
 
-            // Consume immediately — OTP cannot be reused
-            $consume = $this->db->prepare('UPDATE otp_codes SET consumed_at = NOW() WHERE id = :id');
-            $consume->execute(['id' => $row['id']]);
+            $this->db->prepare('UPDATE otp_codes SET consumed_at = NOW() WHERE id = :id')
+                ->execute(['id' => $row['id']]);
             $this->db->commit();
             return ['ok' => true, 'mobile' => $mobile];
         } catch (\Throwable) {
@@ -223,16 +280,20 @@ final class OtpService
         }
     }
 
-    private function invalidateOtpRow(int $otpId): void
+    private function hashOtp(string $code, string $mobile): string
     {
-        if ($otpId <= 0) {
-            return;
+        $key = (string) (config('app.key') ?: ($_ENV['APP_KEY'] ?? 'sarva-otp'));
+        return 'hmac:' . hash_hmac('sha256', $code . '|' . $mobile, $key);
+    }
+
+    private function verifyOtpHash(string $code, string $mobile, string $stored): bool
+    {
+        if (str_starts_with($stored, 'hmac:')) {
+            $expected = $this->hashOtp($code, $mobile);
+            return hash_equals($expected, $stored);
         }
-        try {
-            $this->db->prepare('UPDATE otp_codes SET consumed_at = NOW() WHERE id = ? AND consumed_at IS NULL')
-                ->execute([$otpId]);
-        } catch (\Throwable) {
-        }
+        // Legacy bcrypt rows (pre-HMAC)
+        return password_verify($code, $stored);
     }
 
     /** @param array<string, mixed> $sms */
@@ -241,23 +302,21 @@ final class OtpService
         $error = mb_strtolower((string) ($sms['error'] ?? ''));
         $http = (int) ($sms['http'] ?? 0);
         if ($http === 401 || $http === 403 || str_contains($error, 'کلید') || str_contains($error, 'api')) {
-            return 'سرویس پیامک در دسترس نیست. لطفاً بعداً تلاش کنید.';
+            return 'ارسال کد تأیید انجام نشد. لطفاً دوباره تلاش کنید.';
         }
         if (str_contains($error, 'قالب') || str_contains($error, 'template')) {
-            return 'سرویس پیامک در دسترس نیست. لطفاً بعداً تلاش کنید.';
+            return 'ارسال کد تأیید انجام نشد. لطفاً دوباره تلاش کنید.';
         }
         if (str_contains($error, 'اتصال') || str_contains($error, 'timeout') || $http === 0) {
-            return 'ارتباط با سرویس پیامک برقرار نشد. دوباره تلاش کنید.';
+            return 'ارسال کد تأیید انجام نشد. لطفاً دوباره تلاش کنید.';
         }
-        return 'ارسال کد تأیید ناموفق بود. دوباره تلاش کنید.';
+        return 'ارسال کد تأیید انجام نشد. لطفاً دوباره تلاش کنید.';
     }
 
     /**
-     * Persist delivery outcome without storing the OTP plaintext.
-     *
      * @param array<string, mixed> $result
      */
-    private function logSms(string $mobile, string $type, bool $ok, array $result): void
+    private function logSms(string $mobile, bool $ok, array $result): void
     {
         try {
             $safe = $result;
@@ -269,7 +328,7 @@ final class OtpService
             );
             $stmt->execute([
                 'm' => $mobile,
-                't' => $type,
+                't' => 'otp',
                 'b' => $body,
                 'p' => $result['provider'] ?? SmsManager::driver(),
                 'mid' => $result['message_id'] ?? null,
@@ -281,10 +340,10 @@ final class OtpService
                     'error' => $ok ? null : ($safe['error'] ?? null),
                     'http' => $safe['http'] ?? null,
                     'status_code' => $safe['status_code'] ?? null,
-                    'permanent' => $safe['permanent'] ?? null,
-                    'app_pre_send_ms' => $safe['app_pre_send_ms'] ?? null,
                     'smsir_api_ms' => $safe['smsir_api_ms'] ?? ($safe['duration_ms'] ?? null),
                     'app_total_ms' => $safe['app_total_ms'] ?? null,
+                    'generate_ms' => $safe['generate_ms'] ?? null,
+                    'database_ms' => $safe['database_ms'] ?? null,
                     'queued' => false,
                 ], JSON_UNESCAPED_UNICODE),
             ]);
@@ -293,7 +352,7 @@ final class OtpService
     }
 
     /** @param array<string, mixed> $data */
-    private function timingLog(string $event, array $data): void
+    private function writeTimingLine(array $data): void
     {
         try {
             $root = dirname(__DIR__, 2);
@@ -301,12 +360,22 @@ final class OtpService
             if (!is_dir($dir)) {
                 @mkdir($dir, 0755, true);
             }
-            $line = json_encode([
-                'at' => date('c'),
-                'event' => $event,
-                'data' => $data,
-            ], JSON_UNESCAPED_UNICODE) . PHP_EOL;
-            @file_put_contents($dir . DIRECTORY_SEPARATOR . 'otp-timing.log', $line, FILE_APPEND | LOCK_EX);
+            $line = sprintf(
+                "OTP_REQUEST id=%s mobile=%s generate_ms=%d database_ms=%d sms_api_ms=%d total_ms=%d provider_status=%s queue=0\n",
+                (string) ($data['id'] ?? ''),
+                (string) ($data['mobile'] ?? ''),
+                (int) ($data['generate_ms'] ?? 0),
+                (int) ($data['database_ms'] ?? 0),
+                (int) ($data['sms_api_ms'] ?? 0),
+                (int) ($data['total_ms'] ?? 0),
+                (string) ($data['provider_status'] ?? 'unknown')
+            );
+            $json = json_encode($data, JSON_UNESCAPED_UNICODE) . PHP_EOL;
+            @file_put_contents(
+                $dir . DIRECTORY_SEPARATOR . 'otp-timing.log',
+                $line . $json,
+                FILE_APPEND | LOCK_EX
+            );
         } catch (\Throwable) {
         }
     }
@@ -314,9 +383,9 @@ final class OtpService
     private function maskMobile(string $mobile): string
     {
         $digits = preg_replace('/\D+/', '', $mobile) ?? '';
-        if (strlen($digits) < 7) {
+        if (strlen($digits) < 8) {
             return '***';
         }
-        return substr($digits, 0, 4) . '***' . substr($digits, -2);
+        return substr($digits, 0, 2) . '*****' . substr($digits, -4);
     }
 }
