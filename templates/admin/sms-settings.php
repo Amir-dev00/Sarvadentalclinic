@@ -36,5 +36,5 @@ $templates = $templates ?? [];
         </div>
     </form>
     <p class="mt-3" style="color:#6b7280;font-size:.9rem;">برای SMS.ir در فایل <code>.env</code> این مقادیر را بگذارید:<br>
-        <code>SMS_DRIVER=smsir</code> · <code>SMSIR_API_KEY</code> · <code>SMSIR_LINE_NUMBER</code> · <code>SMSIR_TEMPLATE_ID</code> (اختیاری برای OTP)</p>
+        <code>SMS_DRIVER=smsir</code> · <code>SMSIR_API_KEY</code> · <code>SMSIR_OTP_TEMPLATE_ID</code> (OTP) · <code>SMSIR_APPOINTMENT_REMINDER_TEMPLATE_ID</code> (یادآوری نوبت) · <code>SMSIR_LINE_NUMBER</code> (ارسال متن آزاد)</p>
 </div>

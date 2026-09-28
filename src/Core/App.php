@@ -30,10 +30,13 @@ final class App
 
         date_default_timezone_set((string) $this->config('app.timezone', 'Asia/Tehran'));
 
-        Session::start(
-            (string) $this->config('app.session.name', 'sarva_session'),
-            (int) $this->config('app.session.lifetime', 7200)
-        );
+        // Cron / CLI jobs must not open HTTP sessions (locks, cookies, headers).
+        if (PHP_SAPI !== 'cli' && PHP_SAPI !== 'phpdbg') {
+            Session::start(
+                (string) $this->config('app.session.name', 'sarva_session'),
+                (int) $this->config('app.session.lifetime', 7200)
+            );
+        }
 
         Database::boot($this->config['database']);
     }

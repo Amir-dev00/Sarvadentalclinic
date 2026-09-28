@@ -17,7 +17,7 @@
             <!-- Step: mobile -->
             <div class="auth-step" data-step="mobile">
                 <label class="form-label" for="authMobile">شماره موبایل</label>
-                <input type="tel" id="authMobile" class="form-control" inputmode="numeric" maxlength="11" placeholder="09xxxxxxxxx" autocomplete="tel" dir="ltr" style="text-align:left;">
+                <input type="tel" id="authMobile" class="form-control" inputmode="numeric" maxlength="16" placeholder="09xxxxxxxxx" autocomplete="tel" dir="ltr" style="text-align:left;">
                 <button type="button" class="btn btn-primary w-100 mt-3" id="btnRequestOtp" style="background:#031D4F;border-color:#031D4F;border-radius:14px;padding:12px;">
                     دریافت کد تأیید
                 </button>
@@ -26,13 +26,14 @@
 
             <!-- Step: OTP -->
             <div class="auth-step" data-step="otp" style="display:none;">
-                <p class="text-center mb-2" style="color:#031D4F;">کد ۵ رقمی ارسال‌شده به <strong id="otpMobileLabel" dir="ltr"></strong> را وارد کنید</p>
+                <p class="text-center mb-2" style="color:#031D4F;">کد ۶ رقمی ارسال‌شده به <strong id="otpMobileLabel" dir="ltr"></strong> را وارد کنید</p>
                 <div class="otp-inputs" id="otpInputs">
                     <input type="text" inputmode="numeric" maxlength="1" aria-label="رقم ۱" autocomplete="one-time-code">
                     <input type="text" inputmode="numeric" maxlength="1" aria-label="رقم ۲">
                     <input type="text" inputmode="numeric" maxlength="1" aria-label="رقم ۳">
                     <input type="text" inputmode="numeric" maxlength="1" aria-label="رقم ۴">
                     <input type="text" inputmode="numeric" maxlength="1" aria-label="رقم ۵">
+                    <input type="text" inputmode="numeric" maxlength="1" aria-label="رقم ۶">
                 </div>
                 <button type="button" class="btn btn-primary w-100" id="btnVerifyOtp" style="background:#05B18B;border-color:#05B18B;border-radius:14px;padding:12px;">
                     تأیید کد
@@ -154,9 +155,21 @@
         return { status: res.status, data: json };
     }
 
+    function normalizeMobileClient(raw) {
+        var digits = String(raw || '').replace(/[^\d]/g, '');
+        if (digits.indexOf('98') === 0 && digits.length === 12) {
+            digits = '0' + digits.slice(2);
+        }
+        if (digits.length === 10 && digits.charAt(0) === '9') {
+            digits = '0' + digits;
+        }
+        return /^09\d{9}$/.test(digits) ? digits : null;
+    }
+
     async function requestOtp() {
         var raw = (document.getElementById('authMobile').value || '').trim();
-        if (!/^09\d{9}$/.test(raw)) {
+        var normalized = normalizeMobileClient(raw);
+        if (!normalized) {
             showAlert('شماره موبایل معتبر نیست. مثال: 09123456789', 'error');
             return;
         }
@@ -164,12 +177,13 @@
         btn.disabled = true;
         showAlert('');
         try {
-            var result = await postForm('/api/auth/otp/request', { mobile: raw });
+            var result = await postForm('/api/auth/otp/request', { mobile: normalized });
             if (!result.data.ok) {
                 showAlert(result.data.message || 'ارسال کد ناموفق بود.', 'error');
                 return;
             }
-            mobile = raw;
+            mobile = normalized;
+            document.getElementById('authMobile').value = normalized;
             document.getElementById('otpMobileLabel').textContent = mobile;
             clearOtp();
             showStep('otp');
@@ -193,8 +207,8 @@
 
     async function verifyOtp() {
         var code = getOtpCode();
-        if (code.length !== 5) {
-            showAlert('لطفاً هر ۵ رقم کد را وارد کنید.', 'error');
+        if (code.length !== 6) {
+            showAlert('لطفاً هر ۶ رقم کد را وارد کنید.', 'error');
             return;
         }
         var btn = document.getElementById('btnVerifyOtp');
@@ -260,7 +274,7 @@
         input.addEventListener('input', function () {
             input.value = input.value.replace(/\D/g, '').slice(0, 1);
             if (input.value && otpInputs[idx + 1]) otpInputs[idx + 1].focus();
-            if (getOtpCode().length === 5) verifyOtp();
+            if (getOtpCode().length === 6) verifyOtp();
         });
         input.addEventListener('keydown', function (e) {
             if (e.key === 'Enter') {
@@ -274,11 +288,11 @@
         });
         input.addEventListener('paste', function (e) {
             e.preventDefault();
-            var text = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '').slice(0, 5);
+            var text = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '').slice(0, 6);
             text.split('').forEach(function (ch, i) {
                 if (otpInputs[i]) otpInputs[i].value = ch;
             });
-            if (text.length === 5) verifyOtp();
+            if (text.length === 6) verifyOtp();
             else if (otpInputs[text.length]) otpInputs[text.length].focus();
         });
     });

@@ -29,23 +29,62 @@ final class SmsIrProvider implements SmsProviderInterface
 
     public function sendOtp(string $mobile, string $code): array
     {
-        $templateId = (int) (config('sms.otp_template_id') ?: ($_ENV['SMSIR_TEMPLATE_ID'] ?? 0));
-        if ($templateId > 0) {
-            return $this->request('/send/verify', [
-                'mobile' => $mobile,
-                'templateId' => $templateId,
-                'parameters' => [
-                    ['name' => 'CODE', 'value' => $code],
-                ],
-            ]);
+        $templateId = (int) (config('sms.otp_template_id') ?: 0);
+        if ($templateId <= 0) {
+            return [
+                'ok' => false,
+                'provider' => 'smsir',
+                'error' => 'شناسه قالب OTP تنظیم نشده است.',
+                'permanent' => true,
+            ];
         }
-        $clinic = (string) setting('clinic_name', 'کلینیک دندانپزشکی سروا');
-        return $this->sendMessage($mobile, "کد تأیید {$clinic}: {$code}");
+
+        // SMS.ir Verify expects Iranian mobiles like 09xxxxxxxxx
+        $normalized = normalize_mobile($mobile);
+        if ($normalized === null) {
+            return [
+                'ok' => false,
+                'provider' => 'smsir',
+                'error' => 'شماره موبایل معتبر نیست.',
+                'permanent' => true,
+            ];
+        }
+
+        return $this->sendTemplate($normalized, $templateId, [
+            ['name' => 'CODE', 'value' => $code],
+        ]);
     }
 
     public function sendAppointmentReminder(string $mobile, string $message): array
     {
         return $this->sendMessage($mobile, $message);
+    }
+
+    public function sendTemplate(string $mobile, int $templateId, array $parameters): array
+    {
+        if ($templateId <= 0) {
+            return ['ok' => false, 'provider' => 'smsir', 'error' => 'شناسه قالب SMS.ir تنظیم نشده است.', 'permanent' => true];
+        }
+
+        $safeParams = [];
+        foreach ($parameters as $param) {
+            $name = trim((string) ($param['name'] ?? ''));
+            $value = trim((string) ($param['value'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+            // SMS.ir verify parameters are length-limited.
+            $safeParams[] = [
+                'name' => $name,
+                'value' => mb_substr($value !== '' ? $value : '-', 0, 25),
+            ];
+        }
+
+        return $this->request('/send/verify', [
+            'mobile' => $mobile,
+            'templateId' => $templateId,
+            'parameters' => $safeParams,
+        ]);
     }
 
     /** @param array<string, mixed> $payload */
@@ -84,7 +123,7 @@ final class SmsIrProvider implements SmsProviderInterface
 
         $decoded = json_decode((string) $raw, true);
         if (!is_array($decoded)) {
-            return ['ok' => false, 'provider' => 'smsir', 'error' => 'پاسخ نامعتبر از SMS.ir', 'permanent' => false, 'http' => $http, 'raw' => substr((string) $raw, 0, 400)];
+            return ['ok' => false, 'provider' => 'smsir', 'error' => 'پاسخ نامعتبر از SMS.ir', 'permanent' => false, 'http' => $http];
         }
 
         $status = (int) ($decoded['status'] ?? 0);
@@ -99,6 +138,7 @@ final class SmsIrProvider implements SmsProviderInterface
         }
 
         $permanent = in_array($status, [10, 11, 12, 13], true) || $http === 401 || $http === 403;
+        // Never include request headers/API key; only provider status payload (no credentials).
         return [
             'ok' => $ok,
             'provider' => 'smsir',
@@ -106,7 +146,7 @@ final class SmsIrProvider implements SmsProviderInterface
             'error' => $ok ? null : (string) ($decoded['message'] ?? 'ارسال ناموفق'),
             'permanent' => $permanent,
             'http' => $http,
-            'raw' => $decoded,
+            'status_code' => $status,
         ];
     }
 }

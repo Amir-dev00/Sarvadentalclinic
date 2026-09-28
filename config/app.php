@@ -11,7 +11,7 @@ return [
     'timezone' => $_ENV['APP_TIMEZONE'] ?? 'Asia/Tehran',
     'key' => $_ENV['APP_KEY'] ?? '',
     'locale' => 'fa',
-    'otp_length' => (int) ($_ENV['OTP_LENGTH'] ?? 5),
+    'otp_length' => (int) ($_ENV['OTP_LENGTH'] ?? 6),
     'otp_ttl' => (int) ($_ENV['SMS_OTP_TTL'] ?? 120),
     'otp_resend_cooldown' => (int) ($_ENV['SMS_RESEND_COOLDOWN'] ?? 60),
     'otp_max_attempts' => (int) ($_ENV['SMS_MAX_ATTEMPTS'] ?? 5),

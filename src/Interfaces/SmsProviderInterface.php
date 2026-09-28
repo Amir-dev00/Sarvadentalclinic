@@ -11,4 +11,12 @@ interface SmsProviderInterface
     public function sendOtp(string $mobile, string $code): array;
 
     public function sendAppointmentReminder(string $mobile, string $message): array;
+
+    /**
+     * SMS.ir Verify (ultra) template send.
+     *
+     * @param list<array{name:string,value:string}> $parameters
+     * @return array<string, mixed>
+     */
+    public function sendTemplate(string $mobile, int $templateId, array $parameters): array;
 }

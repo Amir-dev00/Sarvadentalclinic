@@ -15,13 +15,27 @@ final class LogSmsProvider implements SmsProviderInterface
 
     public function sendOtp(string $mobile, string $code): array
     {
-        $message = "کد تأیید کلینیک دندانپزشکی سروا: {$code}";
-        return $this->log('otp', $mobile, $message, ['code' => $code]);
+        $extra = ['template_id' => (int) config('sms.otp_template_id', 0)];
+        // Never write OTP digits to disk in production.
+        if (config('app.debug') && strtolower((string) config('app.env', 'local')) !== 'production') {
+            $extra['code'] = $code;
+        } else {
+            $extra['code'] = '[redacted]';
+        }
+        return $this->log('otp', $mobile, 'OTP verify template', $extra);
     }
 
     public function sendAppointmentReminder(string $mobile, string $message): array
     {
         return $this->log('reminder', $mobile, $message);
+    }
+
+    public function sendTemplate(string $mobile, int $templateId, array $parameters): array
+    {
+        return $this->log('template', $mobile, 'verify-template', [
+            'template_id' => $templateId,
+            'parameters' => $parameters,
+        ]);
     }
 
     /** @param array<string, mixed> $extra */

@@ -47,6 +47,15 @@ final class SmsService
         if ($message === '') {
             return 0;
         }
+
+        $messageType = (string) ($job['message_type'] ?? 'general');
+        $appointmentId = !empty($job['appointment_id']) ? (int) $job['appointment_id'] : null;
+        if ($appointmentId && $messageType === 'appointment_reminder') {
+            if ($this->reminderAlreadyHandled($appointmentId)) {
+                return 0;
+            }
+        }
+
         $key = $job['idempotency_key'] ?? null;
         if ($key === '') {
             $key = null;
@@ -82,14 +91,14 @@ final class SmsService
                 );
                 $stmt->execute([
                     $job['patient_id'] ?? null,
-                    $job['appointment_id'] ?? null,
+                    $appointmentId,
                     $job['template_id'] ?? null,
                     $job['automation_rule_id'] ?? null,
                     $job['admin_user_id'] ?? null,
                     $batchId,
                     $mobile,
                     $message,
-                    $job['message_type'] ?? 'general',
+                    $messageType,
                     $job['source'] ?? 'manual',
                     'pending',
                     $max,
@@ -106,13 +115,13 @@ final class SmsService
                 );
                 $stmt->execute([
                     $job['patient_id'] ?? null,
-                    $job['appointment_id'] ?? null,
+                    $appointmentId,
                     $job['template_id'] ?? null,
                     $job['automation_rule_id'] ?? null,
                     $job['admin_user_id'] ?? null,
                     $mobile,
                     $message,
-                    $job['message_type'] ?? 'general',
+                    $messageType,
                     $job['source'] ?? 'manual',
                     'pending',
                     $max,
@@ -193,8 +202,17 @@ final class SmsService
         $provider = SmsManager::make();
         foreach ($rows as $row) {
             $report['processed']++;
-            $result = $this->processOne($row, $provider);
-            $report[$result]++;
+            try {
+                $result = $this->processOne($row, $provider);
+                $report[$result]++;
+            } catch (\Throwable $e) {
+                $report['failed']++;
+                try {
+                    $this->finish((int) $row['id'], 'failed', 'خطای غیرمنتظره در ارسال');
+                } catch (\Throwable) {
+                }
+                // Continue remaining queue items on shared hosting.
+            }
         }
         return $report;
     }
@@ -205,10 +223,11 @@ final class SmsService
         $id = (int) $row['id'];
         $appointmentId = $row['appointment_id'] ? (int) $row['appointment_id'] : null;
         $message = (string) $row['rendered_message'];
+        $a = null;
 
         if ($appointmentId) {
             $appt = $this->db->prepare(
-                "SELECT a.status, a.starts_at, a.deleted_at,
+                "SELECT a.status, a.starts_at, a.deleted_at, a.reminder_sent_at,
                         CONCAT(d.first_name,' ',d.last_name) doctor_name, s.name service_name,
                         p.first_name, p.last_name, p.file_number, p.public_code, p.mobile
                  FROM appointments a
@@ -221,6 +240,10 @@ final class SmsService
             $a = $appt->fetch(PDO::FETCH_ASSOC);
             if (!$a || $a['deleted_at'] || in_array($a['status'], ['cancelled', 'expired', 'no_show', 'completed', 'awaiting_payment'], true)) {
                 $this->finish($id, 'cancelled', 'نوبت دیگر واجد شرایط ارسال نیست.');
+                return 'cancelled';
+            }
+            if (($row['message_type'] ?? '') === 'appointment_reminder' && !empty($a['reminder_sent_at'])) {
+                $this->finish($id, 'cancelled', 'یادآوری این نوبت قبلاً ارسال شده است.');
                 return 'cancelled';
             }
             if (!empty($row['automation_rule_id'])) {
@@ -258,7 +281,7 @@ final class SmsService
 
         $attempts = (int) $row['attempts'] + 1;
         $max = (int) ($row['max_attempts'] ?: 3);
-        $send = $provider->sendMessage((string) $row['mobile'], $message);
+        $send = $this->dispatchSend($provider, $row, $a, $message);
         $ok = (bool) ($send['ok'] ?? false);
 
         $this->writeLog($row, $message, $send, $attempts, $ok);
@@ -290,10 +313,97 @@ final class SmsService
         return 'retried';
     }
 
+    /**
+     * Deliver via SMS.ir verify template for appointment reminders when configured.
+     *
+     * @param array<string, mixed> $row
+     * @param array<string, mixed>|null $appointment
+     * @return array<string, mixed>
+     */
+    private function dispatchSend(
+        \Sarva\Interfaces\SmsProviderInterface $provider,
+        array $row,
+        ?array $appointment,
+        string $message
+    ): array {
+        $mobile = (string) $row['mobile'];
+        $type = (string) ($row['message_type'] ?? 'general');
+        $templateId = (int) config('sms.appointment_reminder_template_id', 0);
+
+        if ($type === 'appointment_reminder' && $templateId > 0 && $appointment) {
+            $fullName = trim((string) ($appointment['first_name'] ?? '') . ' ' . (string) ($appointment['last_name'] ?? ''));
+            if ($fullName === '') {
+                $fullName = 'مراجع';
+            }
+            $apptTime = date('H:i', strtotime((string) ($appointment['starts_at'] ?? '')) ?: time());
+
+            return $provider->sendTemplate($mobile, $templateId, [
+                ['name' => 'FULL_NAME', 'value' => $fullName],
+                ['name' => 'APPOINTMENT_TIME', 'value' => $apptTime],
+            ]);
+        }
+
+        if ($type === 'appointment_reminder') {
+            return $provider->sendAppointmentReminder($mobile, $message);
+        }
+
+        return $provider->sendMessage($mobile, $message);
+    }
+
+    private function reminderAlreadyHandled(int $appointmentId): bool
+    {
+        try {
+            $st = $this->db->prepare(
+                "SELECT reminder_sent_at FROM appointments WHERE id=? AND deleted_at IS NULL LIMIT 1"
+            );
+            $st->execute([$appointmentId]);
+            $sentAt = $st->fetchColumn();
+            if ($sentAt) {
+                return true;
+            }
+        } catch (\Throwable) {
+        }
+
+        try {
+            $q = $this->db->prepare(
+                "SELECT id FROM sms_queue
+                 WHERE appointment_id=? AND message_type='appointment_reminder'
+                   AND status IN ('pending','processing','retrying','sent')
+                 LIMIT 1"
+            );
+            $q->execute([$appointmentId]);
+            if ($q->fetchColumn()) {
+                return true;
+            }
+        } catch (\Throwable) {
+        }
+
+        try {
+            $l = $this->db->prepare(
+                "SELECT id FROM sms_logs
+                 WHERE appointment_id=? AND message_type='appointment_reminder' AND status='sent'
+                 LIMIT 1"
+            );
+            $l->execute([$appointmentId]);
+            if ($l->fetchColumn()) {
+                return true;
+            }
+        } catch (\Throwable) {
+        }
+
+        return false;
+    }
+
     /** @param array<string, mixed> $row @param array<string, mixed> $send */
     private function writeLog(array $row, string $message, array $send, int $attempts, bool $ok): void
     {
         $key = $row['idempotency_key'] ?: null;
+        // Strip any accidental credential-like keys before persisting provider payload.
+        $safeSend = $send;
+        unset($safeSend['api_key'], $safeSend['headers'], $safeSend['request']);
+        if (isset($safeSend['raw']) && is_array($safeSend['raw'])) {
+            unset($safeSend['raw']['apiKey'], $safeSend['raw']['api_key']);
+        }
         try {
             if ($this->hasLogBatchColumn()) {
                 $this->db->prepare(
@@ -314,12 +424,12 @@ final class SmsService
                     $row['source'] ?? 'manual',
                     $row['admin_user_id'] ?: null,
                     $message,
-                    $send['provider'] ?? SmsManager::driver(),
-                    $send['message_id'] ?? null,
+                    $safeSend['provider'] ?? SmsManager::driver(),
+                    $safeSend['message_id'] ?? null,
                     $ok ? 'sent' : 'failed',
                     $attempts,
-                    $ok ? null : mb_substr((string) ($send['error'] ?? ''), 0, 500),
-                    json_encode($send, JSON_UNESCAPED_UNICODE),
+                    $ok ? null : mb_substr((string) ($safeSend['error'] ?? ''), 0, 500),
+                    json_encode($safeSend, JSON_UNESCAPED_UNICODE),
                     $ok ? $key : null,
                     $ok ? date('Y-m-d H:i:s') : null,
                 ]);
@@ -341,12 +451,12 @@ final class SmsService
                     $row['source'] ?? 'manual',
                     $row['admin_user_id'] ?: null,
                     $message,
-                    $send['provider'] ?? SmsManager::driver(),
-                    $send['message_id'] ?? null,
+                    $safeSend['provider'] ?? SmsManager::driver(),
+                    $safeSend['message_id'] ?? null,
                     $ok ? 'sent' : 'failed',
                     $attempts,
-                    $ok ? null : mb_substr((string) ($send['error'] ?? ''), 0, 500),
-                    json_encode($send, JSON_UNESCAPED_UNICODE),
+                    $ok ? null : mb_substr((string) ($safeSend['error'] ?? ''), 0, 500),
+                    json_encode($safeSend, JSON_UNESCAPED_UNICODE),
                     $ok ? $key : null,
                     $ok ? date('Y-m-d H:i:s') : null,
                 ]);

@@ -215,6 +215,7 @@ final class SmsAutomationService
                     JOIN doctors d ON d.id=a.doctor_id
                     JOIN services s ON s.id=a.service_id
                     WHERE a.deleted_at IS NULL
+                      AND a.reminder_sent_at IS NULL
                       AND a.status IN ($placeholders)
                       $extra
                       AND DATE(a.starts_at) = DATE(DATE_ADD(NOW(), INTERVAL {$offset} DAY))";
@@ -230,6 +231,7 @@ final class SmsAutomationService
                     JOIN doctors d ON d.id=a.doctor_id
                     JOIN services s ON s.id=a.service_id
                     WHERE a.deleted_at IS NULL
+                      AND a.reminder_sent_at IS NULL
                       AND a.status IN ($placeholders)
                       $extra
                       AND a.starts_at > NOW()
