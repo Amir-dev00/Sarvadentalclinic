@@ -10,7 +10,11 @@ final class LogSmsProvider implements SmsProviderInterface
 {
     public function sendMessage(string $mobile, string $message): array
     {
-        return $this->log('message', $mobile, $message);
+        $line = preg_replace('/\D+/', '', (string) (config('sms.line_number') ?: '')) ?: null;
+        return $this->log('message', $mobile, $message, [
+            'sender_line' => $line,
+            'message_channel' => 'bulk',
+        ]) + ['sender_line' => $line, 'message_channel' => 'bulk'];
     }
 
     public function sendOtp(string $mobile, string $code): array

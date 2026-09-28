@@ -9,6 +9,10 @@ use Sarva\Interfaces\SmsProviderInterface;
 /**
  * Official SMS.ir REST API v1 (https://api.sms.ir/v1).
  * Auth: X-API-KEY header. Credentials never leave the server.
+ *
+ * Separation:
+ * - OTP → /send/verify (no sender line)
+ * - Automation / free-text → /send/bulk (requires SMSIR_LINE_NUMBER)
  */
 final class SmsIrProvider implements SmsProviderInterface
 {
@@ -24,15 +28,30 @@ final class SmsIrProvider implements SmsProviderInterface
 
     public function sendMessage(string $mobile, string $message): array
     {
-        $line = (int) (config('sms.line_number') ?: ($_ENV['SMSIR_LINE_NUMBER'] ?? 0));
-        if ($line <= 0) {
-            return ['ok' => false, 'provider' => 'smsir', 'error' => 'شماره خط SMS.ir تنظیم نشده است.', 'permanent' => true];
+        $line = $this->resolveLineNumber();
+        if ($line === null) {
+            $this->logSenderMissing('bulk');
+            return [
+                'ok' => false,
+                'provider' => 'smsir',
+                'error' => 'شماره خط SMS.ir تنظیم نشده است.',
+                'permanent' => true,
+                'event' => 'smsir_sender_missing',
+                'sender_line' => null,
+                'duration_ms' => 0,
+            ];
         }
-        return $this->request('/send/bulk', [
-            'lineNumber' => $line,
+
+        $result = $this->request('/send/bulk', [
+            // SMS.ir expects numeric lineNumber; keep as int on 64-bit hosts.
+            'lineNumber' => (int) $line,
             'MessageText' => $message,
             'Mobiles' => [$mobile],
         ], self::BULK_TIMEOUT, self::BULK_CONNECT_TIMEOUT);
+
+        $result['sender_line'] = $line;
+        $result['message_channel'] = 'bulk';
+        return $result;
     }
 
     public function sendOtp(string $mobile, string $code): array
@@ -57,7 +76,7 @@ final class SmsIrProvider implements SmsProviderInterface
             ];
         }
 
-        // Immediate Verify API call — never queued.
+        // Immediate Verify API call — never queued, never needs sender line.
         return $this->sendTemplate($normalized, $templateId, [
             ['name' => 'CODE', 'value' => $code],
         ], true);
@@ -94,11 +113,46 @@ final class SmsIrProvider implements SmsProviderInterface
         $timeout = $isOtp ? self::OTP_TIMEOUT : self::BULK_TIMEOUT;
         $connect = $isOtp ? self::OTP_CONNECT_TIMEOUT : self::BULK_CONNECT_TIMEOUT;
 
-        return $this->request('/send/verify', [
+        $result = $this->request('/send/verify', [
             'mobile' => $mobile,
             'templateId' => $templateId,
             'parameters' => $safeParams,
         ], $timeout, $connect);
+
+        $result['message_channel'] = $isOtp ? 'otp_verify' : 'verify';
+        return $result;
+    }
+
+    /**
+     * Centralized sender line from config/env (SMSIR_LINE_NUMBER / SMS_SENDER).
+     */
+    private function resolveLineNumber(): ?string
+    {
+        $raw = (string) (config('sms.line_number') ?: ($_ENV['SMSIR_LINE_NUMBER'] ?? $_ENV['SMS_SENDER'] ?? ''));
+        $digits = preg_replace('/\D+/', '', $raw) ?? '';
+        if ($digits === '' || $digits === '0') {
+            return null;
+        }
+        return $digits;
+    }
+
+    private function logSenderMissing(string $smsType): void
+    {
+        try {
+            $root = dirname(__DIR__, 2);
+            $dir = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'logs';
+            if (!is_dir($dir)) {
+                @mkdir($dir, 0755, true);
+            }
+            $line = json_encode([
+                'at' => date('c'),
+                'event' => 'smsir_sender_missing',
+                'sms_type' => $smsType,
+                'config_key' => 'SMSIR_LINE_NUMBER',
+            ], JSON_UNESCAPED_UNICODE) . PHP_EOL;
+            @file_put_contents($dir . DIRECTORY_SEPARATOR . 'sms.log', $line, FILE_APPEND | LOCK_EX);
+        } catch (\Throwable) {
+        }
     }
 
     /**
@@ -190,6 +244,7 @@ final class SmsIrProvider implements SmsProviderInterface
             'permanent' => $permanent,
             'http' => $http,
             'status_code' => $status,
+            'provider_status' => $status,
             'duration_ms' => $durationMs,
         ];
     }

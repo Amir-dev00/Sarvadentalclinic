@@ -400,11 +400,39 @@ final class SmsService
         $key = $row['idempotency_key'] ?: null;
         // Strip any accidental credential-like keys before persisting provider payload.
         $safeSend = $send;
-        unset($safeSend['api_key'], $safeSend['headers'], $safeSend['request']);
-        if (isset($safeSend['raw']) && is_array($safeSend['raw'])) {
-            unset($safeSend['raw']['apiKey'], $safeSend['raw']['api_key']);
+        unset($safeSend['api_key'], $safeSend['headers'], $safeSend['request'], $safeSend['raw']);
+        $messageType = (string) ($row['message_type'] ?? 'general');
+        $source = (string) ($row['source'] ?? 'manual');
+        $safeSend['provider'] = $safeSend['provider'] ?? SmsManager::driver();
+        $safeSend['sender_line'] = $safeSend['sender_line'] ?? (string) (config('sms.line_number') ?: '');
+        $safeSend['message_type'] = $messageType;
+        $safeSend['source'] = $source;
+        $safeSend['message_channel'] = $safeSend['message_channel']
+            ?? (($messageType === 'appointment_reminder' && (int) config('sms.appointment_reminder_template_id', 0) > 0)
+                ? 'verify'
+                : 'bulk');
+        if ($source === 'automation' || !empty($row['automation_rule_id'])) {
+            $safeSend['message_type'] = $safeSend['message_type'] ?: 'automation';
+            $safeSend['automation_rule_id'] = $row['automation_rule_id'] ?: null;
         }
+        $safeSend['provider_status'] = $safeSend['provider_status'] ?? ($safeSend['status_code'] ?? ($ok ? 1 : 0));
+        $safeSend['message_id'] = $safeSend['message_id'] ?? null;
         try {
+            $logPayload = [
+                'provider' => $safeSend['provider'],
+                'sender_line' => $safeSend['sender_line'] !== '' ? $safeSend['sender_line'] : null,
+                'message_type' => $safeSend['message_type'],
+                'source' => $source,
+                'message_channel' => $safeSend['message_channel'],
+                'provider_status' => $safeSend['provider_status'],
+                'message_id' => $safeSend['message_id'],
+                'ok' => $ok,
+                'error' => $ok ? null : ($safeSend['error'] ?? null),
+                'http' => $safeSend['http'] ?? null,
+                'automation_rule_id' => $safeSend['automation_rule_id'] ?? null,
+                'event' => $safeSend['event'] ?? null,
+                'duration_ms' => $safeSend['duration_ms'] ?? null,
+            ];
             if ($this->hasLogBatchColumn()) {
                 $this->db->prepare(
                     'INSERT INTO sms_logs
@@ -420,16 +448,16 @@ final class SmsService
                     $row['id'] ?? null,
                     $row['batch_id'] ?: null,
                     $row['mobile'],
-                    $row['message_type'] ?? 'general',
-                    $row['source'] ?? 'manual',
+                    $messageType,
+                    $source,
                     $row['admin_user_id'] ?: null,
                     $message,
-                    $safeSend['provider'] ?? SmsManager::driver(),
-                    $safeSend['message_id'] ?? null,
+                    $logPayload['provider'],
+                    $logPayload['message_id'],
                     $ok ? 'sent' : 'failed',
                     $attempts,
                     $ok ? null : mb_substr((string) ($safeSend['error'] ?? ''), 0, 500),
-                    json_encode($safeSend, JSON_UNESCAPED_UNICODE),
+                    json_encode($logPayload, JSON_UNESCAPED_UNICODE),
                     $ok ? $key : null,
                     $ok ? date('Y-m-d H:i:s') : null,
                 ]);
@@ -447,16 +475,16 @@ final class SmsService
                     $row['automation_rule_id'] ?: null,
                     $row['id'] ?? null,
                     $row['mobile'],
-                    $row['message_type'] ?? 'general',
-                    $row['source'] ?? 'manual',
+                    $messageType,
+                    $source,
                     $row['admin_user_id'] ?: null,
                     $message,
-                    $safeSend['provider'] ?? SmsManager::driver(),
-                    $safeSend['message_id'] ?? null,
+                    $logPayload['provider'],
+                    $logPayload['message_id'],
                     $ok ? 'sent' : 'failed',
                     $attempts,
                     $ok ? null : mb_substr((string) ($safeSend['error'] ?? ''), 0, 500),
-                    json_encode($safeSend, JSON_UNESCAPED_UNICODE),
+                    json_encode($logPayload, JSON_UNESCAPED_UNICODE),
                     $ok ? $key : null,
                     $ok ? date('Y-m-d H:i:s') : null,
                 ]);
