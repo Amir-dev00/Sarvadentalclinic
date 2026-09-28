@@ -1,45 +1,358 @@
-name: Deploy to cPanel
+name: Deploy Changed Files to cPanel
 
 on:
   push:
     branches:
       - main
 
+concurrency:
+  group: cpanel-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
-    name: Deploy Production
+    name: Deploy Changed Files
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
+      # =====================================================
+      # Detect changed + deleted files using Git
+      # =====================================================
+      - name: Detect deployment changes
+        id: changes
+        shell: bash
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          echo "========================================"
+          echo " Detecting deployment changes"
+          echo "========================================"
+          echo "Before: $BEFORE"
+          echo "After:  $AFTER"
+          echo ""
+
+          rm -rf .deploy_changed
+          mkdir -p .deploy_changed
+
+          : > /tmp/upload_files
+          : > /tmp/delete_files
+
+          is_protected() {
+            local FILE="$1"
+
+            case "$FILE" in
+              .github/*|\
+              .git/*|\
+              .env|\
+              .idea/*|\
+              .vscode/*|\
+              node_modules/*|\
+              */node_modules/*|\
+              uploads/*|\
+              */uploads/*|\
+              public/uploads/*|\
+              */public/uploads/*|\
+              *.log)
+                return 0
+                ;;
+            esac
+
+            return 1
+          }
+
+          # -------------------------------------------------
+          # First deployment
+          # -------------------------------------------------
+          if [[ "$BEFORE" =~ ^0+$ ]] || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+
+            echo "No previous commit found."
+            echo "Treating all tracked files as new."
+            echo ""
+
+            git ls-files -z > /tmp/all_files
+
+            while IFS= read -r -d '' FILE; do
+
+              if is_protected "$FILE"; then
+                echo "IGNORE: $FILE"
+                continue
+              fi
+
+              if [[ -f "$FILE" ]]; then
+                printf '%s\0' "$FILE" >> /tmp/upload_files
+              fi
+
+            done < /tmp/all_files
+
+          else
+
+            # -------------------------------------------------
+            # Parse Git changes
+            # -------------------------------------------------
+
+            git diff \
+              --name-status \
+              -z \
+              "$BEFORE" \
+              "$AFTER" > /tmp/git_changes
+
+            exec 3< /tmp/git_changes
+
+            while IFS= read -r -d '' STATUS <&3; do
+
+              # ===============================================
+              # RENAMED FILE
+              # Git provides:
+              # R100 old/path.php new/path.php
+              # ===============================================
+              if [[ "$STATUS" == R* ]]; then
+
+                IFS= read -r -d '' OLD_FILE <&3
+                IFS= read -r -d '' NEW_FILE <&3
+
+                if ! is_protected "$OLD_FILE"; then
+                  printf '%s\0' "$OLD_FILE" >> /tmp/delete_files
+                  echo "DELETE (rename old): $OLD_FILE"
+                fi
+
+                if ! is_protected "$NEW_FILE" && [[ -f "$NEW_FILE" ]]; then
+                  printf '%s\0' "$NEW_FILE" >> /tmp/upload_files
+                  echo "UPLOAD (rename new): $NEW_FILE"
+                fi
+
+                continue
+              fi
+
+              # ===============================================
+              # COPIED FILE
+              # ===============================================
+              if [[ "$STATUS" == C* ]]; then
+
+                IFS= read -r -d '' OLD_FILE <&3
+                IFS= read -r -d '' NEW_FILE <&3
+
+                if ! is_protected "$NEW_FILE" && [[ -f "$NEW_FILE" ]]; then
+                  printf '%s\0' "$NEW_FILE" >> /tmp/upload_files
+                  echo "UPLOAD (copy): $NEW_FILE"
+                fi
+
+                continue
+              fi
+
+              # All remaining statuses have one path
+              IFS= read -r -d '' FILE <&3
+
+              if is_protected "$FILE"; then
+                echo "IGNORE: $FILE"
+                continue
+              fi
+
+              case "$STATUS" in
+
+                A|M|T)
+                  if [[ -f "$FILE" ]]; then
+                    printf '%s\0' "$FILE" >> /tmp/upload_files
+                    echo "UPLOAD [$STATUS]: $FILE"
+                  fi
+                  ;;
+
+                D)
+                  printf '%s\0' "$FILE" >> /tmp/delete_files
+                  echo "DELETE: $FILE"
+                  ;;
+
+                *)
+                  echo "SKIP [$STATUS]: $FILE"
+                  ;;
+
+              esac
+
+            done
+
+            exec 3<&-
+
+          fi
+
+          # =================================================
+          # Prepare changed files directory
+          # =================================================
+
+          UPLOAD_COUNT=0
+          DELETE_COUNT=0
+
+          while IFS= read -r -d '' FILE; do
+
+            # Safety
+            case "$FILE" in
+              /*|../*|*/../*)
+                echo "Unsafe path rejected: $FILE"
+                exit 1
+                ;;
+            esac
+
+            if [[ ! -f "$FILE" ]]; then
+              continue
+            fi
+
+            mkdir -p ".deploy_changed/$(dirname "$FILE")"
+
+            cp -p \
+              "$FILE" \
+              ".deploy_changed/$FILE"
+
+            UPLOAD_COUNT=$((UPLOAD_COUNT + 1))
+
+          done < /tmp/upload_files
+
+
+          while IFS= read -r -d '' FILE; do
+
+            # Safety
+            case "$FILE" in
+              /*|../*|*/../*)
+                echo "Unsafe delete path rejected: $FILE"
+                exit 1
+                ;;
+            esac
+
+            DELETE_COUNT=$((DELETE_COUNT + 1))
+
+          done < /tmp/delete_files
+
+
+          echo ""
+          echo "========================================"
+          echo " Deployment Summary"
+          echo "========================================"
+          echo "Upload / Update: $UPLOAD_COUNT"
+          echo "Delete:          $DELETE_COUNT"
+          echo ""
+
+          echo "upload_count=$UPLOAD_COUNT" >> "$GITHUB_OUTPUT"
+          echo "delete_count=$DELETE_COUNT" >> "$GITHUB_OUTPUT"
+
+
+      # =====================================================
+      # Install lftp only when needed
+      # =====================================================
       - name: Install lftp
+        if: >
+          steps.changes.outputs.upload_count != '0' ||
+          steps.changes.outputs.delete_count != '0'
         run: |
           sudo apt-get update
           sudo apt-get install -y lftp
 
-      - name: Deploy to cPanel
+
+      # =====================================================
+      # Upload ONLY added / modified files
+      # =====================================================
+      - name: Upload changed files
+        if: steps.changes.outputs.upload_count != '0'
+
         env:
           FTP_HOST: ${{ secrets.FTP_SERVER }}
           FTP_USER: ${{ secrets.FTP_USERNAME }}
           FTP_PASS: ${{ secrets.FTP_PASSWORD }}
+
         run: |
+          echo "Uploading only changed/new files..."
+
           lftp -c "
           set ftp:ssl-force true;
           set ftp:ssl-protect-data true;
           set ssl:verify-certificate no;
+
           open -u \"$FTP_USER\",\"$FTP_PASS\" \"$FTP_HOST\";
+
           mirror -R \
             --verbose \
-            --only-newer \
-            --parallel=3 \
-            --exclude-glob .git/ \
-            --exclude-glob .github/ \
-            --exclude-glob .env \
-            --exclude-glob node_modules/ \
-            --exclude-glob .idea/ \
-            --exclude-glob .vscode/ \
-            ./ /;
-          bye
+            --parallel=4 \
+            ./.deploy_changed/ \
+            /;
+
+          bye;
           "
+
+
+      # =====================================================
+      # Delete ONLY files deleted from Git
+      # =====================================================
+      - name: Delete removed files from cPanel
+        if: steps.changes.outputs.delete_count != '0'
+
+        shell: bash
+
+        env:
+          FTP_HOST: ${{ secrets.FTP_SERVER }}
+          FTP_USER: ${{ secrets.FTP_USERNAME }}
+          FTP_PASS: ${{ secrets.FTP_PASSWORD }}
+
+        run: |
+          set -euo pipefail
+
+          echo "Deleting files removed from Git..."
+
+          COMMAND_FILE="/tmp/delete_commands.lftp"
+
+          cat > "$COMMAND_FILE" <<EOF
+          set ftp:ssl-force true
+          set ftp:ssl-protect-data true
+          set ssl:verify-certificate no
+          open -u "$FTP_USER","$FTP_PASS" "$FTP_HOST"
+          EOF
+
+          while IFS= read -r -d '' FILE; do
+
+            # Extra safety
+            case "$FILE" in
+              /*|../*|*/../*)
+                echo "Unsafe delete path rejected: $FILE"
+                exit 1
+                ;;
+            esac
+
+            # Escape double quotes for lftp command
+            SAFE_FILE="${FILE//\"/\\\"}"
+
+            echo "DELETE REMOTE: /$FILE"
+
+            printf 'rm -f "/%s"\n' "$SAFE_FILE" >> "$COMMAND_FILE"
+
+          done < /tmp/delete_files
+
+          echo "bye" >> "$COMMAND_FILE"
+
+          lftp -f "$COMMAND_FILE"
+
+
+      # =====================================================
+      # Nothing changed
+      # =====================================================
+      - name: Nothing to deploy
+        if: >
+          steps.changes.outputs.upload_count == '0' &&
+          steps.changes.outputs.delete_count == '0'
+        run: |
+          echo "No deployable changes detected."
+
+
+      # =====================================================
+      # Final summary
+      # =====================================================
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo "========================================"
+          echo " Deployment Finished"
+          echo "========================================"
+          echo "Uploaded / Updated: ${{ steps.changes.outputs.upload_count }}"
+          echo "Deleted:            ${{ steps.changes.outputs.delete_count }}"
