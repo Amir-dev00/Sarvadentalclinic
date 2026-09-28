@@ -15,7 +15,7 @@ $initial = mb_substr(trim($name) !== '' ? $name : 'ب', 0, 1);
     <p class="tm-card-text">«<?= e($content) ?>»</p>
     <footer class="tm-card-author">
         <?php if ($avatar): ?>
-            <img class="tm-card-avatar" src="<?= asset($avatar) ?>" alt="" width="40" height="40" loading="lazy">
+            <img class="tm-card-avatar" src="<?= media_url($avatar) ?>" alt="" width="40" height="40" loading="lazy">
         <?php else: ?>
             <span class="tm-card-avatar tm-card-avatar--fallback" aria-hidden="true"><?= e($initial) ?></span>
         <?php endif; ?>

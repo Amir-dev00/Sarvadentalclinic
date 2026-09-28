@@ -15,9 +15,9 @@
                 $media = $item['media_path'] ?? '';
                 $thumb = $item['thumb_path'] ?? '';
                 $isExternal = str_starts_with($media, 'http://') || str_starts_with($media, 'https://');
-                $href = $isExternal ? $media : asset($media);
+                $href = $isExternal ? $media : media_url($media);
                 $thumbSrc = $thumb
-                    ? ((str_starts_with($thumb, 'http://') || str_starts_with($thumb, 'https://')) ? $thumb : asset($thumb))
+                    ? ((str_starts_with($thumb, 'http://') || str_starts_with($thumb, 'https://')) ? $thumb : media_url($thumb))
                     : asset('images/gallery-3.jpg');
                 $delay = ($i % 3) * 0.2;
             ?>

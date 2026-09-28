@@ -104,6 +104,8 @@ function asset(string $path): string
 
 /**
  * Public URL for media stored as relative paths (uploads/..., images/...).
+ * If an uploads path is missing on disk, try sibling extensions (orphaned .webp
+ * rows) so a surviving original format can still be linked.
  */
 function media_url(?string $path): string
 {
@@ -115,12 +117,41 @@ function media_url(?string $path): string
     }
     $path = ltrim(str_replace('\\', '/', $path), '/');
     if (str_starts_with($path, 'assets/')) {
-        return url_path_prefix() . '/' . $path;
+        $path = substr($path, 7);
     }
-    if (str_starts_with($path, 'uploads/') || str_starts_with($path, 'images/')) {
-        return asset($path);
+
+    if (str_starts_with($path, 'uploads/') && !asset_filesystem_path($path)) {
+        $alt = media_alternate_existing_path($path);
+        if ($alt !== null) {
+            return asset($alt);
+        }
     }
+
     return asset($path);
+}
+
+/**
+ * When a stored uploads path is missing, look for the same basename with another
+ * extension (e.g. DB has .webp but only .jpg was mirrored).
+ */
+function media_alternate_existing_path(string $relativePath): ?string
+{
+    $relativePath = ltrim(str_replace('\\', '/', $relativePath), '/');
+    $dot = strrpos($relativePath, '.');
+    if ($dot === false) {
+        return null;
+    }
+    $base = substr($relativePath, 0, $dot);
+    foreach (['jpg', 'jpeg', 'png', 'webp', 'gif'] as $ext) {
+        $candidate = $base . '.' . $ext;
+        if ($candidate === $relativePath) {
+            continue;
+        }
+        if (asset_filesystem_path($candidate)) {
+            return $candidate;
+        }
+    }
+    return null;
 }
 
 /**
@@ -143,13 +174,22 @@ function asset_storage_roots(): array
         $projectRoot . DIRECTORY_SEPARATOR . 'public' . DIRECTORY_SEPARATOR . 'assets',
     ];
 
+    // Prefer the assets directory that sits under the active document root when known.
+    $docRoot = isset($_SERVER['DOCUMENT_ROOT'])
+        ? realpath((string) $_SERVER['DOCUMENT_ROOT'])
+        : false;
+    if ($docRoot) {
+        $docAssets = $docRoot . DIRECTORY_SEPARATOR . 'assets';
+        array_unshift($candidates, $docAssets);
+    }
+
     $resolved = [];
     foreach ($candidates as $dir) {
         if (!is_dir($dir)) {
             @mkdir($dir, 0755, true);
         }
         $real = realpath($dir) ?: $dir;
-        $resolved[$real] = $dir;
+        $resolved[$real] = $real;
     }
 
     $roots = array_values($resolved);
@@ -157,8 +197,31 @@ function asset_storage_roots(): array
 }
 
 /**
+ * Absolute path to a published asset relative path, searching all storage roots.
+ */
+function asset_filesystem_path(string $relativePath): ?string
+{
+    $relativePath = ltrim(str_replace('\\', '/', $relativePath), '/');
+    if ($relativePath === '') {
+        return null;
+    }
+    if (str_starts_with($relativePath, 'assets/')) {
+        $relativePath = substr($relativePath, 7);
+    }
+
+    foreach (asset_storage_roots() as $root) {
+        $full = rtrim($root, '/\\') . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativePath);
+        if (is_file($full)) {
+            return $full;
+        }
+    }
+    return null;
+}
+
+/**
  * Copy/write a file into every asset storage root under the given relative path
- * (e.g. uploads/2026/09/file.webp). Returns true if at least one write succeeded.
+ * (e.g. uploads/2026/09/file.jpg). Returns true only when every distinct root
+ * received the file — partial publishes caused 404s when docroot was /public.
  */
 function publish_asset_file(string $sourceAbsolute, string $relativePath): bool
 {
@@ -167,24 +230,33 @@ function publish_asset_file(string $sourceAbsolute, string $relativePath): bool
         return false;
     }
 
-    $ok = false;
-    foreach (asset_storage_roots() as $root) {
+    $roots = asset_storage_roots();
+    if ($roots === []) {
+        return false;
+    }
+
+    $written = 0;
+    foreach ($roots as $root) {
         $dest = rtrim($root, '/\\') . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativePath);
         $dir = dirname($dest);
         if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
-            continue;
+            return false;
         }
-        if (@copy($sourceAbsolute, $dest)) {
-            $ok = true;
+        if (!@copy($sourceAbsolute, $dest) || !is_file($dest)) {
+            return false;
         }
+        @chmod($dest, 0644);
+        $written++;
     }
-    return $ok;
+
+    return $written > 0;
 }
 
 /**
- * Store an uploaded image under assets/{relDir} (mirrored to public/assets),
- * convert to WebP at original resolution when GD is available, and optionally
- * register in media table. Returns relative path (uploads/...) or null.
+ * Store an uploaded image under assets/{relDir} (mirrored to public/assets)
+ * and optionally register in media table. Keeps the original raster format when
+ * WebP conversion or multi-root publish cannot be verified, so DB paths are
+ * never left pointing at missing files.
  *
  * @param string|null $relDir Relative dir under assets, e.g. uploads/2026/09 or uploads/patients/1/2026/09
  */
@@ -227,38 +299,43 @@ function store_uploaded_image(
         @unlink($file['tmp_name']);
     }
 
+    $resolvedDir = $relDir !== null && trim($relDir) !== ''
+        ? trim(str_replace('\\', '/', $relDir), '/')
+        : 'uploads/' . date('Y/m');
+
     $finalName = $base . '.' . $origExt;
     $finalMime = $mime;
     $finalSize = (int) (@filesize($tmpOriginal) ?: ($file['size'] ?? 0));
     $publishSource = $tmpOriginal;
-
     $tmpWebp = $tmpDir . DIRECTORY_SEPARATOR . 'sarva_' . $base . '.webp';
+    $usedWebp = false;
+
     try {
         $converted = (new \Sarva\Services\ImageConverter())->toWebp($tmpOriginal, $tmpWebp, 82);
-        if (!empty($converted['ok']) && is_file($tmpWebp)) {
-            $finalName = $base . '.webp';
-            $finalMime = 'image/webp';
-            $finalSize = (int) ($converted['size'] ?? filesize($tmpWebp));
-            $publishSource = $tmpWebp;
-            if (is_file($tmpOriginal) && realpath($tmpOriginal) !== realpath($tmpWebp)) {
-                @unlink($tmpOriginal);
+        if (!empty($converted['ok']) && is_file($tmpWebp) && (int) filesize($tmpWebp) > 0) {
+            $webpPath = $resolvedDir . '/' . $base . '.webp';
+            if (publish_asset_file($tmpWebp, $webpPath) && asset_filesystem_path($webpPath)) {
+                $finalName = $base . '.webp';
+                $finalMime = 'image/webp';
+                $finalSize = (int) ($converted['size'] ?? filesize($tmpWebp));
+                $publishSource = $tmpWebp;
+                $usedWebp = true;
             }
         }
     } catch (Throwable) {
         // Keep original format if conversion is unavailable.
     }
 
-    $relDir = $relDir !== null && trim($relDir) !== ''
-        ? trim(str_replace('\\', '/', $relDir), '/')
-        : 'uploads/' . date('Y/m');
-    $path = $relDir . '/' . $finalName;
-    if (!publish_asset_file($publishSource, $path)) {
-        @unlink($publishSource);
+    $path = $resolvedDir . '/' . $finalName;
+    if (!$usedWebp && !publish_asset_file($publishSource, $path)) {
         @unlink($tmpOriginal);
         @unlink($tmpWebp);
         return null;
     }
-    @unlink($publishSource);
+    if ($usedWebp) {
+        $path = $resolvedDir . '/' . $finalName;
+    }
+
     @unlink($tmpOriginal);
     @unlink($tmpWebp);
 

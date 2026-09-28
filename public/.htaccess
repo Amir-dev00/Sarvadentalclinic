@@ -26,6 +26,9 @@ RewriteRule ^ - [L]
   AddType image/webp .webp
 </IfModule>
 
+# Missing /assets/* → front controller (self-heals from project /assets)
+RewriteRule ^assets/ index.php [L]
+
 # Front controller
 RewriteRule ^ index.php [L]
 

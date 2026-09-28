@@ -27,7 +27,7 @@ $defaultName = (string) ($defaultName ?? '');
                             <?php if (!empty($t['avatar'])): ?>
                             <div class="testimonial-item-author-image">
                                 <figure class="image-anime">
-                                    <img src="<?= asset($t['avatar']) ?>" alt="<?= e($t['patient_name'] ?? '') ?>">
+                                    <img src="<?= media_url($t['avatar']) ?>" alt="<?= e($t['patient_name'] ?? '') ?>">
                                 </figure>
                             </div>
                             <?php endif; ?>
