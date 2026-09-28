@@ -332,7 +332,12 @@ a:focus{
 }
 
 .cb-cursor:before{
+	display: none !important;
 	background: var(--accent-color);
+}
+
+.cb-cursor {
+	display: none !important;
 }
 
 .preloader{

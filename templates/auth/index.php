@@ -24,35 +24,17 @@
                 <p class="text-muted small mt-3 mb-0 text-center" id="modeHint">اگر قبلاً ثبت‌نام کرده‌اید، کد را وارد کنید تا وارد شوید.</p>
             </div>
 
-            <!-- Step: OTP — one real input + visual boxes -->
+            <!-- Step: OTP -->
             <div class="auth-step" data-step="otp" style="display:none;">
                 <p class="text-center mb-2" style="color:#031D4F;">کد ۶ رقمی ارسال‌شده به <strong id="otpMobileLabel" dir="ltr"></strong> را وارد کنید</p>
-                <label class="visually-hidden" for="otp">کد تأیید</label>
-                <div class="otp-field" id="otpField">
-                    <div class="otp-inputs" id="otpBoxes" aria-hidden="true">
-                        <span class="otp-box" data-index="0"></span>
-                        <span class="otp-box" data-index="1"></span>
-                        <span class="otp-box" data-index="2"></span>
-                        <span class="otp-box" data-index="3"></span>
-                        <span class="otp-box" data-index="4"></span>
-                        <span class="otp-box" data-index="5"></span>
-                    </div>
-                    <input
-                        type="text"
-                        id="otp"
-                        name="otp"
-                        class="otp-real-input"
-                        inputmode="numeric"
-                        autocomplete="one-time-code"
-                        pattern="[0-9]*"
-                        maxlength="6"
-                        enterkeyhint="done"
-                        autocapitalize="off"
-                        autocorrect="off"
-                        spellcheck="false"
-                        dir="ltr"
-                        aria-label="کد تأیید"
-                    >
+                <div class="otp-inputs" id="otpInputs">
+                    <!-- First box accepts full autofill (iOS/Android); digits are split across boxes -->
+                    <input type="text" id="otpDigit0" name="one-time-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" enterkeyhint="done" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="رقم ۱ / کد تأیید" dir="ltr">
+                    <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" enterkeyhint="done" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="رقم ۲" dir="ltr">
+                    <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" enterkeyhint="done" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="رقم ۳" dir="ltr">
+                    <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" enterkeyhint="done" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="رقم ۴" dir="ltr">
+                    <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" enterkeyhint="done" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="رقم ۵" dir="ltr">
+                    <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" enterkeyhint="done" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="رقم ۶" dir="ltr">
                 </div>
                 <button type="button" class="btn btn-primary w-100" id="btnVerifyOtp" style="background:#05B18B;border-color:#05B18B;border-radius:14px;padding:12px;">
                     تأیید کد
@@ -81,25 +63,15 @@
 
 <script>
 (function () {
-    var OTP_LENGTH = 6;
     var mode = 'login';
     var mobile = '';
     var countdownTimer = null;
     var secondsLeft = 0;
-    var isRequesting = false;
-    var isVerifying = false;
-    var webOtpAbort = null;
 
     var switchEl = document.getElementById('authSwitch');
     var alertEl = document.getElementById('authAlert');
     var modeHint = document.getElementById('modeHint');
-    var otpInput = document.getElementById('otp');
-    var otpBoxes = Array.prototype.slice.call(document.querySelectorAll('#otpBoxes .otp-box'));
-    var otpField = document.getElementById('otpField');
-    var btnRequest = document.getElementById('btnRequestOtp');
-    var btnResend = document.getElementById('btnResend');
-    var btnVerify = document.getElementById('btnVerifyOtp');
-    var requestLabel = 'دریافت کد تأیید';
+    var otpInputs = Array.prototype.slice.call(document.querySelectorAll('#otpInputs input'));
 
     function csrf() {
         return (window.SARVA && window.SARVA.csrf) ? window.SARVA.csrf : '';
@@ -132,91 +104,62 @@
             : 'اگر قبلاً ثبت‌نام کرده‌اید، کد را وارد کنید تا وارد شوید.';
     }
 
-    function abortWebOtp() {
-        if (webOtpAbort) {
-            try { webOtpAbort.abort(); } catch (e) {}
-            webOtpAbort = null;
-        }
-    }
-
     function showStep(name) {
         document.querySelectorAll('.auth-step').forEach(function (el) {
             el.style.display = el.getAttribute('data-step') === name ? '' : 'none';
         });
         showAlert('');
-        if (name !== 'otp') abortWebOtp();
-    }
-
-    function cleanOtp(raw) {
-        return String(raw || '').replace(/\D/g, '').slice(0, OTP_LENGTH);
     }
 
     function getOtpCode() {
-        return cleanOtp(otpInput.value);
+        return otpInputs.map(function (i) { return (i.value || '').replace(/\D/g, '').slice(0, 1); }).join('');
     }
 
-    function renderOtpBoxes() {
-        var code = getOtpCode();
-        otpBoxes.forEach(function (box, i) {
-            var ch = code.charAt(i) || '';
-            box.textContent = ch;
-            box.classList.toggle('is-filled', ch !== '');
-            box.classList.toggle('is-active', i === code.length || (code.length === OTP_LENGTH && i === OTP_LENGTH - 1));
+    function fillOtp(raw) {
+        var digits = String(raw || '').replace(/\D/g, '').slice(0, 6);
+        otpInputs.forEach(function (input, i) {
+            input.value = digits.charAt(i) || '';
         });
-        otpField.classList.toggle('is-complete', code.length === OTP_LENGTH);
-        otpField.classList.toggle('is-error', false);
-    }
-
-    function setOtpValue(raw, opts) {
-        opts = opts || {};
-        var next = cleanOtp(raw);
-        if (otpInput.value !== next) {
-            otpInput.value = next;
-        }
-        renderOtpBoxes();
-        if (opts.autoSubmit !== false && next.length === OTP_LENGTH) {
+        if (digits.length === 6) {
             verifyOtp();
+        } else if (otpInputs[digits.length]) {
+            otpInputs[digits.length].focus();
         }
     }
 
     function clearOtp() {
-        otpInput.value = '';
-        renderOtpBoxes();
-        otpField.classList.remove('is-error');
-    }
-
-    function focusOtp() {
-        otpInput.focus();
-        try {
-            var len = otpInput.value.length;
-            otpInput.setSelectionRange(len, len);
-        } catch (e) {}
+        otpInputs.forEach(function (i) { i.value = ''; });
+        if (otpInputs[0]) otpInputs[0].focus();
     }
 
     function listenWebOtp() {
-        abortWebOtp();
         if (!('OTPCredential' in window) || !navigator.credentials) return;
-        webOtpAbort = new AbortController();
+        if (window.__sarvaOtpAbort) {
+            try { window.__sarvaOtpAbort.abort(); } catch (e) {}
+        }
+        var ac = new AbortController();
+        window.__sarvaOtpAbort = ac;
         navigator.credentials.get({
             otp: { transport: ['sms'] },
-            signal: webOtpAbort.signal
+            signal: ac.signal
         }).then(function (cred) {
-            if (cred && cred.code) setOtpValue(cred.code);
+            if (cred && cred.code) fillOtp(cred.code);
         }).catch(function () {});
     }
 
     function startCountdown(sec) {
         secondsLeft = sec || 60;
         var label = document.getElementById('otpCountdown');
+        var resend = document.getElementById('btnResend');
         label.style.display = '';
-        btnResend.style.display = 'none';
+        resend.style.display = 'none';
         if (countdownTimer) clearInterval(countdownTimer);
         function tick() {
             label.innerHTML = 'ارسال مجدد تا <strong>' + secondsLeft + '</strong> ثانیه';
             if (secondsLeft <= 0) {
                 clearInterval(countdownTimer);
                 label.style.display = 'none';
-                btnResend.style.display = '';
+                resend.style.display = '';
                 return;
             }
             secondsLeft -= 1;
@@ -252,22 +195,19 @@
     }
 
     async function requestOtp() {
-        if (isRequesting) return;
         var raw = (document.getElementById('authMobile').value || '').trim();
         var normalized = normalizeMobileClient(raw);
         if (!normalized) {
             showAlert('شماره موبایل معتبر نیست. مثال: 09123456789', 'error');
             return;
         }
-        isRequesting = true;
-        btnRequest.disabled = true;
-        btnResend.disabled = true;
-        btnRequest.textContent = 'در حال ارسال...';
+        var btn = document.getElementById('btnRequestOtp');
+        btn.disabled = true;
         showAlert('');
         try {
             var result = await postForm('/api/auth/otp/request', { mobile: normalized });
             if (!result.data.ok) {
-                showAlert(result.data.message || 'ارسال کد تأیید انجام نشد. لطفاً دوباره تلاش کنید.', 'error');
+                showAlert(result.data.message || 'ارسال کد ناموفق بود.', 'error');
                 return;
             }
             mobile = normalized;
@@ -277,43 +217,38 @@
             showStep('otp');
             startCountdown(result.data.resend_in || 60);
             listenWebOtp();
-            focusOtp();
+            if (otpInputs[0]) otpInputs[0].focus();
             if (result.data.dev_code) {
                 showAlert('حالت توسعه: کد تأیید شما ' + result.data.dev_code + ' است (پیامک واقعی ارسال نمی‌شود).', 'success');
-                setOtpValue(result.data.dev_code, { autoSubmit: false });
+                // Prefill OTP boxes for convenience in demo mode
+                var digits = String(result.data.dev_code).split('');
+                otpInputs.forEach(function (input, i) {
+                    input.value = digits[i] || '';
+                });
             } else {
                 showAlert(result.data.message || 'کد تأیید ارسال شد.', 'success');
             }
         } catch (e) {
             showAlert('خطا در ارتباط با سرور.', 'error');
         } finally {
-            isRequesting = false;
-            btnRequest.disabled = false;
-            btnResend.disabled = false;
-            btnRequest.textContent = requestLabel;
+            btn.disabled = false;
         }
     }
 
     async function verifyOtp() {
-        if (isVerifying) return;
         var code = getOtpCode();
-        if (code.length !== OTP_LENGTH) {
+        if (code.length !== 6) {
             showAlert('لطفاً هر ۶ رقم کد را وارد کنید.', 'error');
-            otpField.classList.add('is-error');
-            focusOtp();
             return;
         }
-        isVerifying = true;
-        btnVerify.disabled = true;
+        var btn = document.getElementById('btnVerifyOtp');
+        btn.disabled = true;
         try {
             var result = await postForm('/api/auth/otp/verify', { mobile: mobile, code: code });
             if (!result.data.ok) {
-                showAlert(result.data.message || 'کد واردشده صحیح نیست.', 'error');
-                otpField.classList.add('is-error');
-                focusOtp();
+                showAlert(result.data.message || 'کد نادرست است.', 'error');
                 return;
             }
-            abortWebOtp();
             if (result.data.is_new || result.data.needs_profile) {
                 showStep('profile');
                 showAlert('شماره تأیید شد. اطلاعات خود را تکمیل کنید.', 'success');
@@ -323,8 +258,7 @@
         } catch (e) {
             showAlert('خطا در تأیید کد.', 'error');
         } finally {
-            isVerifying = false;
-            btnVerify.disabled = false;
+            btn.disabled = false;
         }
     }
 
@@ -358,36 +292,40 @@
         });
     });
 
-    btnRequest.addEventListener('click', requestOtp);
-    btnVerify.addEventListener('click', verifyOtp);
+    document.getElementById('btnRequestOtp').addEventListener('click', requestOtp);
+    document.getElementById('btnVerifyOtp').addEventListener('click', verifyOtp);
     document.getElementById('btnRegister').addEventListener('click', register);
-    btnResend.addEventListener('click', requestOtp);
+    document.getElementById('btnResend').addEventListener('click', requestOtp);
     document.getElementById('btnBackMobile').addEventListener('click', function () {
-        abortWebOtp();
         showStep('mobile');
     });
 
-    otpField.addEventListener('click', function () { focusOtp(); });
-
-    otpInput.addEventListener('input', function () {
-        setOtpValue(otpInput.value);
-    });
-    otpInput.addEventListener('change', function () {
-        setOtpValue(otpInput.value);
-    });
-    otpInput.addEventListener('paste', function (e) {
-        e.preventDefault();
-        var text = (e.clipboardData || window.clipboardData).getData('text');
-        setOtpValue(text);
-    });
-    otpInput.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') {
+    otpInputs.forEach(function (input, idx) {
+        input.addEventListener('input', function () {
+            var digits = input.value.replace(/\D/g, '');
+            if (digits.length > 1) {
+                fillOtp(digits);
+                return;
+            }
+            input.value = digits.slice(0, 1);
+            if (input.value && otpInputs[idx + 1]) otpInputs[idx + 1].focus();
+            if (getOtpCode().length === 6) verifyOtp();
+        });
+        input.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                verifyOtp();
+                return;
+            }
+            if (e.key === 'Backspace' && !input.value && otpInputs[idx - 1]) {
+                otpInputs[idx - 1].focus();
+            }
+        });
+        input.addEventListener('paste', function (e) {
             e.preventDefault();
-            verifyOtp();
-        }
-    });
-    otpInput.addEventListener('focus', function () {
-        renderOtpBoxes();
+            var text = (e.clipboardData || window.clipboardData).getData('text');
+            fillOtp(text);
+        });
     });
 
     document.getElementById('authMobile').addEventListener('keydown', function (e) {
@@ -406,7 +344,6 @@
         });
     });
 
-    renderOtpBoxes();
     setMode('login');
 })();
 </script>

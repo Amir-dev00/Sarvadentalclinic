@@ -33,7 +33,6 @@
     <link href="<?= asset('css/animate.css') ?>" rel="stylesheet">
     <link rel="stylesheet" href="<?= asset('css/magnific-popup.css') ?>">
     <link rel="stylesheet" href="<?= asset('css/twentytwenty.css') ?>">
-    <link rel="stylesheet" href="<?= asset('css/mousecursor.css') ?>">
     <link href="<?= asset('css/custom.css') ?>" rel="stylesheet" media="screen">
     <link href="<?= asset('css/rtl.css') ?>" rel="stylesheet" media="screen">
     <?php if (!empty($extraCss)): foreach ((array) $extraCss as $css): ?>

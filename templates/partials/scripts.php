@@ -7,7 +7,6 @@
 <script src="<?= asset('js/jquery.event.move.js') ?>" defer></script>
 <script src="<?= asset('js/jquery.twentytwenty.js') ?>" defer></script>
 <script src="<?= asset('js/gsap.min.js') ?>" defer></script>
-<script src="<?= asset('js/magiccursor.js') ?>" defer></script>
 <script src="<?= asset('js/SplitText.min.js') ?>" defer></script>
 <script src="<?= asset('js/ScrollTrigger.min.js') ?>" defer></script>
 <script src="<?= asset('js/wow.min.js') ?>" defer></script>
