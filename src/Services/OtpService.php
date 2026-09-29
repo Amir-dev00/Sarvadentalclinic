@@ -41,20 +41,22 @@ final class OtpService
             return ['ok' => false, 'message' => "لطفاً {$wait} ثانیه دیگر دوباره تلاش کنید.", 'retry_after' => $wait];
         }
 
+        $mobileHourlyLimit = (int) config('app.otp_max_requests_per_hour', 20);
         $rate = $this->db->prepare(
             'SELECT COUNT(*) FROM otp_codes WHERE mobile = :m AND created_at > (NOW() - INTERVAL 1 HOUR)'
         );
         $rate->execute(['m' => $mobile]);
-        if ((int) $rate->fetchColumn() >= 5) {
+        if ((int) $rate->fetchColumn() >= $mobileHourlyLimit) {
             return ['ok' => false, 'message' => 'تعداد درخواست‌ها بیش از حد مجاز است. بعداً تلاش کنید.'];
         }
 
         if ($ip !== '') {
+            $ipHourlyLimit = (int) config('app.otp_max_requests_per_ip_hour', 100);
             $ipRate = $this->db->prepare(
                 'SELECT COUNT(*) FROM otp_codes WHERE ip_address = :ip AND created_at > (NOW() - INTERVAL 1 HOUR)'
             );
             $ipRate->execute(['ip' => $ip]);
-            if ((int) $ipRate->fetchColumn() >= 20) {
+            if ((int) $ipRate->fetchColumn() >= $ipHourlyLimit) {
                 return ['ok' => false, 'message' => 'تعداد درخواست‌ها از این شبکه بیش از حد مجاز است. بعداً تلاش کنید.'];
             }
         }
@@ -63,7 +65,7 @@ final class OtpService
         $code = (string) random_int(100000, 999999);
         $generateMs = (int) round((hrtime(true) - $tGen0) / 1_000_000);
         $generatedAt = date('c');
-        $ttl = (int) config('app.otp_ttl', 120);
+        $ttl = (int) config('app.otp_ttl', 300);
 
         // Send FIRST — do not invalidate a still-valid OTP until provider accepts.
         $smsStartedAt = date('c');
@@ -148,7 +150,7 @@ final class OtpService
             $ins->bindValue('m', $mobile);
             $ins->bindValue('h', $hash);
             $ins->bindValue('p', self::PURPOSE);
-            $ins->bindValue('max', (int) config('app.otp_max_attempts', 5), PDO::PARAM_INT);
+            $ins->bindValue('max', (int) config('app.otp_max_attempts', 10), PDO::PARAM_INT);
             $ins->bindValue('ttl', $ttl, PDO::PARAM_INT);
             $ins->bindValue('ip', $ip !== '' ? $ip : null);
             $ins->execute();
