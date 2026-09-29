@@ -22,7 +22,7 @@ $defaultDoctorName = $defaultDoctor
                 <?php if (!$isPatient): ?>
                 <div class="auth-alert error booking-login-alert">
                     برای رزرو نوبت ابتدا وارد حساب بیمار شوید.
-                    <a href="<?= url('/auth') ?>" class="btn-default">ورود / ثبت‌نام</a>
+                    <a href="<?= url('/auth') ?>" class="btn-default">ورود به پنل بیمار</a>
                 </div>
                 <?php endif; ?>
 

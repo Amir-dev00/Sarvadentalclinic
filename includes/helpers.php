@@ -442,7 +442,7 @@ function booking_url(): string
     if (\Sarva\Core\Auth::isPatient()) {
         return url('/patient');
     }
-    return url('/auth?next=/appointment');
+    return url('/auth');
 }
 
 function csrf_token(): string

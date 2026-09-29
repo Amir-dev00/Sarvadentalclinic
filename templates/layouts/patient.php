@@ -11,6 +11,7 @@
     <link href="<?= asset('css/all.min.css') ?>" rel="stylesheet">
     <link href="<?= asset('css/rtl.css') ?>" rel="stylesheet">
     <style>
+        html { scroll-behavior: smooth; }
         body { font-family: Vazirmatn, sans-serif; margin: 0; background: #f4f6fa; }
         .patient-shell { min-height: 100vh; }
         .patient-nav {

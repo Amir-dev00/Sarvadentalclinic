@@ -64,7 +64,7 @@ if (!$menuItems) {
                             </li>
                             <li class="nav-item nav-item-auth">
                                 <a class="nav-link" href="<?= url(\Sarva\Core\Auth::isPatient() ? '/patient' : '/auth') ?>">
-                                    <?= \Sarva\Core\Auth::isPatient() ? 'پنل من' : 'ورود/ثبت نام' ?>
+                                    <?= \Sarva\Core\Auth::isPatient() ? 'پنل من' : 'ورود به پنل' ?>
                                 </a>
                             </li>
                         </ul>

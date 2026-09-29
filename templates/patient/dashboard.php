@@ -38,12 +38,15 @@ $completed = !empty($patient['profile_completed']);
             <?php if ($completed): ?>
                 <span class="badge" style="background:#e8f8f3;color:#067a5f;padding:8px 12px;border-radius:999px;">پروفایل کامل است</span>
             <?php else: ?>
-                <span class="badge" style="background:#fff4e5;color:#9a6700;padding:8px 12px;border-radius:999px;">پروفایل ناقص — لطفاً تکمیل کنید</span>
+                <a href="#patientProfileForm" class="badge" style="background:#fff4e5;color:#9a6700;padding:8px 12px;border-radius:999px;text-decoration:none;">پروفایل ناقص — تکمیل اطلاعات</a>
             <?php endif; ?>
         </div>
     </div>
-    <div class="mt-3">
+    <div class="mt-3 d-flex flex-wrap gap-2">
         <a href="<?= url('/appointment') ?>" class="btn btn-primary" style="background:#05B18B;border-color:#05B18B;border-radius:12px;">رزرو نوبت جدید</a>
+        <?php if (!$completed): ?>
+            <a href="#patientProfileForm" class="btn btn-outline-primary" style="border-radius:12px;color:#031D4F;border-color:#031D4F;">تکمیل پروفایل</a>
+        <?php endif; ?>
     </div>
 </div>
 
@@ -146,8 +149,12 @@ $completed = !empty($patient['profile_completed']);
 
 <div class="admin-card" style="margin-top:20px;">
     <h2 style="margin:0 0 16px;font-size:1.05rem;color:#031D4F;">ویرایش پروفایل</h2>
-    <form method="post" action="<?= url('/patient/profile') ?>" class="row g-3">
+    <form method="post" action="<?= url('/patient/profile') ?>" id="patientProfileForm" class="row g-3" style="scroll-margin-top:88px;">
         <?= csrf_field() ?>
+        <div class="col-md-4">
+            <label class="form-label">شماره موبایل ورود</label>
+            <input type="text" class="form-control" value="<?= e($patient['mobile'] ?? '') ?>" dir="ltr" readonly disabled>
+        </div>
         <div class="col-md-4">
             <label class="form-label">نام *</label>
             <input type="text" name="first_name" class="form-control" required value="<?= e($patient['first_name'] ?? '') ?>">
@@ -194,3 +201,28 @@ $completed = !empty($patient['profile_completed']);
         </div>
     </form>
 </div>
+<script>
+(function () {
+    function focusProfile() {
+        var form = document.getElementById('patientProfileForm');
+        if (!form) return;
+        var fields = form.querySelectorAll('input, select, textarea');
+        for (var i = 0; i < fields.length; i++) {
+            var el = fields[i];
+            if (el.disabled || el.type === 'hidden' || el.readOnly) continue;
+            if (!String(el.value || '').trim()) {
+                el.focus();
+                return;
+            }
+        }
+    }
+    if (location.hash === '#patientProfileForm') {
+        window.setTimeout(focusProfile, 60);
+    }
+    document.querySelectorAll('a[href="#patientProfileForm"]').forEach(function (link) {
+        link.addEventListener('click', function () {
+            window.setTimeout(focusProfile, 60);
+        });
+    });
+})();
+</script>

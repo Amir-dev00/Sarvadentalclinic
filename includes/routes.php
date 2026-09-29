@@ -350,14 +350,11 @@ $router->get('/case-studies/{slug}', static function (string $slug): void {
 
 // Auth
 $router->get('/auth', static function (): void {
+    unset($_SESSION['auth_redirect']);
     if (Auth::isPatient()) {
-        redirect(safe_internal_path($_GET['next'] ?? null, '/patient'));
+        redirect('/patient');
     }
-    $next = safe_internal_path($_GET['next'] ?? ($_SESSION['auth_redirect'] ?? null), '');
-    if ($next !== '') {
-        $_SESSION['auth_redirect'] = $next;
-    }
-    view('auth/index', ['title' => 'ورود / ثبت‌نام']);
+    view('auth/index', ['title' => 'ورود به پنل بیمار']);
 });
 
 $router->post('/api/auth/otp/request', static function (): void {
@@ -387,12 +384,12 @@ $router->post('/api/auth/otp/verify', static function (): void {
     $stmt->execute([$normalized]);
     $patient = $stmt->fetch();
     if ($patient) {
+        unset($_SESSION['otp_verified_mobile'], $_SESSION['auth_redirect']);
         Auth::loginPatient((int) $patient['id']);
         audit('patient.login', 'patient', (int) $patient['id']);
-        $redir = safe_internal_path($_SESSION['auth_redirect'] ?? null, '/patient');
-        unset($_SESSION['auth_redirect']);
-        json_response(['ok' => true, 'is_new' => false, 'redirect' => url($redir)]);
+        json_response(['ok' => true, 'is_new' => false, 'redirect' => url('/patient')]);
     }
+    unset($_SESSION['auth_redirect']);
     $_SESSION['otp_verified_mobile'] = $normalized;
     json_response(['ok' => true, 'is_new' => true, 'needs_profile' => true]);
 });
@@ -400,26 +397,56 @@ $router->post('/api/auth/otp/verify', static function (): void {
 $router->post('/api/auth/register', static function (): void {
     Csrf::assertValid();
     $mobile = $_SESSION['otp_verified_mobile'] ?? null;
-    if (!$mobile) {
+    if (!is_string($mobile) || $mobile === '') {
         json_response(['ok' => false, 'message' => 'ابتدا شماره موبایل را تأیید کنید.'], 422);
     }
-    $first = trim((string) ($_POST['first_name'] ?? ''));
-    $last = trim((string) ($_POST['last_name'] ?? ''));
-    if ($first === '' || $last === '') {
+    $normalizeName = static function (string $value): ?string {
+        $value = trim($value);
+        $value = preg_replace('/\s+/u', ' ', $value) ?? $value;
+        if ($value === '' || mb_strlen($value) > 100) {
+            return null;
+        }
+        if (!preg_match('/^[\p{L}\p{M}\s\-\x{200c}\']+$/u', $value)) {
+            return null;
+        }
+        return $value;
+    };
+    $first = $normalizeName((string) ($_POST['first_name'] ?? ''));
+    $last = $normalizeName((string) ($_POST['last_name'] ?? ''));
+    if ($first === null || $last === null) {
         json_response(['ok' => false, 'message' => 'نام و نام خانوادگی الزامی است.'], 422);
     }
+    $find = db()->prepare('SELECT id FROM patients WHERE mobile = ? AND deleted_at IS NULL LIMIT 1');
+    $find->execute([$mobile]);
+    $existingId = (int) $find->fetchColumn();
+    if ($existingId > 0) {
+        unset($_SESSION['otp_verified_mobile'], $_SESSION['auth_redirect']);
+        Auth::loginPatient($existingId);
+        audit('patient.login', 'patient', $existingId);
+        json_response(['ok' => true, 'is_new' => false, 'redirect' => url('/patient')]);
+    }
     $code = 'P' . strtoupper(bin2hex(random_bytes(4)));
-    $stmt = db()->prepare(
-        'INSERT INTO patients (public_code, first_name, last_name, mobile, profile_completed) VALUES (?,?,?,?,0)'
-    );
-    $stmt->execute([$code, $first, $last, $mobile]);
-    $id = (int) db()->lastInsertId();
-    unset($_SESSION['otp_verified_mobile']);
+    try {
+        $stmt = db()->prepare(
+            'INSERT INTO patients (public_code, first_name, last_name, mobile, profile_completed) VALUES (?,?,?,?,0)'
+        );
+        $stmt->execute([$code, $first, $last, $mobile]);
+        $id = (int) db()->lastInsertId();
+    } catch (\PDOException $e) {
+        $find->execute([$mobile]);
+        $existingId = (int) $find->fetchColumn();
+        if ($existingId < 1) {
+            json_response(['ok' => false, 'message' => 'ثبت‌نام انجام نشد. دوباره تلاش کنید.'], 422);
+        }
+        unset($_SESSION['otp_verified_mobile'], $_SESSION['auth_redirect']);
+        Auth::loginPatient($existingId);
+        audit('patient.login', 'patient', $existingId);
+        json_response(['ok' => true, 'is_new' => false, 'redirect' => url('/patient')]);
+    }
+    unset($_SESSION['otp_verified_mobile'], $_SESSION['auth_redirect']);
     Auth::loginPatient($id);
     audit('patient.register', 'patient', $id);
-    $redir = safe_internal_path($_SESSION['auth_redirect'] ?? null, '/patient');
-    unset($_SESSION['auth_redirect']);
-    json_response(['ok' => true, 'redirect' => url($redir)]);
+    json_response(['ok' => true, 'redirect' => url('/patient')]);
 });
 
 $router->post('/auth/logout', static function (): void {
@@ -489,8 +516,8 @@ $router->post('/patient/profile', static function (): void {
 // Appointment booking
 $router->get('/appointment', static function (): void {
     if (!Auth::isPatient()) {
-        $_SESSION['auth_redirect'] = '/appointment';
-        redirect('/auth?next=/appointment');
+        unset($_SESSION['auth_redirect']);
+        redirect('/auth');
     }
     track_page_view('/appointment');
     $services = Database::connected()

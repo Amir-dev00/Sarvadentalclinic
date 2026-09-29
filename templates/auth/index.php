@@ -2,14 +2,8 @@
     <div class="container">
         <div class="sarva-auth-card">
             <div class="text-center mb-3">
-                <h1 style="margin:0;font-size:1.5rem;color:#031D4F;font-weight:800;">سروا <span style="color:#05B18B;">دنتال</span></h1>
-                <p style="margin:6px 0 0;color:#6b7280;font-size:.95rem;">ورود یا ثبت‌نام با شماره موبایل</p>
-            </div>
-
-            <div class="sarva-auth-switch" data-mode="login" id="authSwitch">
-                <span class="pill" aria-hidden="true"></span>
-                <button type="button" class="active" data-mode="login">ورود</button>
-                <button type="button" data-mode="register">ثبت‌نام</button>
+                <h1 style="margin:0;font-size:1.5rem;color:#031D4F;font-weight:800;">ورود به پنل بیمار</h1>
+                <p style="margin:6px 0 0;color:#6b7280;font-size:.95rem;line-height:1.8;">شماره موبایل خود را وارد کنید. اگر قبلاً ثبت‌نام کرده باشید وارد حساب می‌شوید؛ در غیر این صورت پس از تأیید شماره، ثبت‌نام شما تکمیل می‌شود.</p>
             </div>
 
             <div id="authAlert" class="auth-alert" style="display:none;" role="alert"></div>
@@ -21,7 +15,6 @@
                 <button type="button" class="btn btn-primary w-100 mt-3" id="btnRequestOtp" style="background:#031D4F;border-color:#031D4F;border-radius:14px;padding:12px;">
                     دریافت کد تأیید
                 </button>
-                <p class="text-muted small mt-3 mb-0 text-center" id="modeHint">اگر قبلاً ثبت‌نام کرده‌اید، کد را وارد کنید تا وارد شوید.</p>
             </div>
 
             <!-- Step: OTP -->
@@ -54,7 +47,7 @@
                 <label class="form-label" for="authLast">نام خانوادگی</label>
                 <input type="text" id="authLast" class="form-control mb-3" autocomplete="family-name">
                 <button type="button" class="btn btn-primary w-100" id="btnRegister" style="background:#031D4F;border-color:#031D4F;border-radius:14px;padding:12px;">
-                    ثبت‌نام و ورود
+                    تکمیل ثبت‌نام و ورود
                 </button>
             </div>
         </div>
@@ -63,14 +56,11 @@
 
 <script>
 (function () {
-    var mode = 'login';
     var mobile = '';
     var countdownTimer = null;
     var secondsLeft = 0;
 
-    var switchEl = document.getElementById('authSwitch');
     var alertEl = document.getElementById('authAlert');
-    var modeHint = document.getElementById('modeHint');
     var otpInputs = Array.prototype.slice.call(document.querySelectorAll('#otpInputs input'));
 
     function csrf() {
@@ -91,17 +81,6 @@
         alertEl.className = 'auth-alert ' + (type || 'error');
         alertEl.textContent = message;
         alertEl.style.display = 'block';
-    }
-
-    function setMode(next) {
-        mode = next;
-        switchEl.setAttribute('data-mode', next);
-        switchEl.querySelectorAll('button').forEach(function (btn) {
-            btn.classList.toggle('active', btn.getAttribute('data-mode') === next);
-        });
-        modeHint.textContent = next === 'register'
-            ? 'با شماره موبایل کد دریافت کنید؛ در صورت جدید بودن، نام را وارد می‌کنید.'
-            : 'اگر قبلاً ثبت‌نام کرده‌اید، کد را وارد کنید تا وارد شوید.';
     }
 
     function showStep(name) {
@@ -254,7 +233,7 @@
                 showAlert('شماره تأیید شد. اطلاعات خود را تکمیل کنید.', 'success');
                 return;
             }
-            window.location.href = result.data.redirect || apiUrl('/patient');
+            window.location.href = apiUrl('/patient');
         } catch (e) {
             showAlert('خطا در تأیید کد.', 'error');
         } finally {
@@ -277,20 +256,13 @@
                 showAlert(result.data.message || 'ثبت‌نام ناموفق بود.', 'error');
                 return;
             }
-            window.location.href = result.data.redirect || apiUrl('/patient');
+            window.location.href = apiUrl('/patient');
         } catch (e) {
             showAlert('خطا در ثبت‌نام.', 'error');
         } finally {
             btn.disabled = false;
         }
     }
-
-    switchEl.querySelectorAll('button').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-            setMode(btn.getAttribute('data-mode'));
-            showStep('mobile');
-        });
-    });
 
     document.getElementById('btnRequestOtp').addEventListener('click', requestOtp);
     document.getElementById('btnVerifyOtp').addEventListener('click', verifyOtp);
@@ -344,6 +316,5 @@
         });
     });
 
-    setMode('login');
 })();
 </script>
