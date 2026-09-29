@@ -6,6 +6,9 @@ namespace Sarva\Services;
 
 use PDO;
 use PDOException;
+use Sarva\Sms\LogSmsProvider;
+use Sarva\Sms\SmsIrProvider;
+use Sarva\Sms\SmsManager;
 
 final class AppointmentService
 {
@@ -163,13 +166,13 @@ final class AppointmentService
         );
         $hist->execute(['id' => $appointmentId]);
 
-        $this->enqueueConfirmationSms($appointmentId);
+        $this->sendAppointmentConfirmationNow($appointmentId);
     }
 
     /**
-     * Admin-created appointment: status=confirmed. Queues confirmation SMS only (never reminder).
+     * Admin-created appointment: status=confirmed. After commit, sends confirmation SMS directly (never reminder).
      *
-     * @return array{ok:bool, message?:string, appointment_id?:int}
+     * @return array{ok:bool, message?:string, appointment_id?:int, sms_sent?:bool, sms_duplicate?:bool}
      */
     public function createConfirmedByAdmin(
         int $patientId,
@@ -266,9 +269,19 @@ final class AppointmentService
             ]);
 
             $this->db->commit();
-            $this->enqueueConfirmationSms($id);
+            $sms = $this->sendAppointmentConfirmationNow($id);
 
-            return ['ok' => true, 'appointment_id' => $id];
+            return [
+                'ok' => true,
+                'appointment_id' => $id,
+                'sms_sent' => $sms['sent'],
+                'sms_duplicate' => $sms['duplicate'],
+                'message' => $sms['sent']
+                    ? 'نوبت با وضعیت تأییدشده ثبت شد و پیامک تأیید ارسال شد.'
+                    : ($sms['duplicate']
+                        ? 'نوبت ثبت شد. پیامک تأیید قبلاً ارسال شده است.'
+                        : 'نوبت با موفقیت ثبت شد، اما ارسال پیامک تأیید با خطا مواجه شد.'),
+            ];
         } catch (PDOException $e) {
             if ($this->db->inTransaction()) {
                 $this->db->rollBack();
@@ -280,31 +293,79 @@ final class AppointmentService
         }
     }
 
-    private function enqueueConfirmationSms(int $appointmentId): void
+    /**
+     * Direct SMS.ir confirmation. Call only after the appointment transaction is committed.
+     * Does not enqueue and does not set reminder_sent_at.
+     *
+     * @return array{ok:bool,sent:bool,duplicate:bool,message:string,message_id:?string,sms_api_ms:int,total_ms:int}
+     */
+    public function sendAppointmentConfirmationNow(int $appointmentId): array
     {
+        $started = hrtime(true);
+        $fail = static function (string $message, int $startedAt, int $apiMs = 0) use ($appointmentId): array {
+            return [
+                'ok' => false,
+                'sent' => false,
+                'duplicate' => false,
+                'message' => $message,
+                'message_id' => null,
+                'sms_api_ms' => $apiMs,
+                'total_ms' => (int) round((hrtime(true) - $startedAt) / 1_000_000),
+            ];
+        };
+
+        if ($this->db->inTransaction()) {
+            return $fail('تراکنش دیتابیس هنوز باز است.', $started);
+        }
+
+        $templateId = SmsService::smsIrTemplateIdForMessageType('appointment_confirmation');
+        $idempotencyKey = 'appointment_confirmation:' . $appointmentId;
+        $legacyKey = 'confirm:' . $appointmentId;
+
+        if ($templateId <= 0) {
+            SmsTemplateRenderer::logEvent('smsir_confirmation_template_missing', [
+                'appointment_id' => $appointmentId,
+                'message_type' => 'appointment_confirmation',
+            ]);
+            return $fail('شناسه قالب تأیید نوبت تنظیم نشده است.', $started);
+        }
+
         try {
-            $templateId = SmsService::smsIrTemplateIdForMessageType('appointment_confirmation');
-            if ($templateId <= 0) {
-                SmsTemplateRenderer::logEvent('smsir_confirmation_template_missing', [
+            if ($this->confirmationAlreadyAccepted($appointmentId, $idempotencyKey, $legacyKey)) {
+                SmsTemplateRenderer::logEvent('APPOINTMENT_CONFIRMATION_SKIPPED_DUPLICATE', [
                     'appointment_id' => $appointmentId,
-                    'message_type' => 'appointment_confirmation',
+                    'template_id' => $templateId,
+                    'idempotency_key' => $idempotencyKey,
                 ]);
-                return;
+                $total = (int) round((hrtime(true) - $started) / 1_000_000);
+                return [
+                    'ok' => true,
+                    'sent' => false,
+                    'duplicate' => true,
+                    'message' => 'پیامک تأیید قبلاً ارسال شده است.',
+                    'message_id' => null,
+                    'sms_api_ms' => 0,
+                    'total_ms' => $total,
+                ];
             }
 
+            $this->cancelPendingConfirmationQueue($idempotencyKey, $legacyKey);
+
             $row = $this->db->prepare(
-                "SELECT a.id, a.starts_at, a.patient_id, p.mobile, p.first_name, p.last_name, p.file_number, p.public_code,
-                        CONCAT(d.first_name,' ',d.last_name) doctor_name, s.name service_name
+                "SELECT a.id, a.starts_at, a.patient_id, p.mobile, p.first_name, p.last_name
                  FROM appointments a
                  JOIN patients p ON p.id=a.patient_id
-                 JOIN doctors d ON d.id=a.doctor_id
-                 JOIN services s ON s.id=a.service_id
-                 WHERE a.id=?"
+                 WHERE a.id=? AND a.deleted_at IS NULL"
             );
             $row->execute([$appointmentId]);
             $data = $row->fetch(PDO::FETCH_ASSOC);
             if (!$data) {
-                return;
+                return $fail('نوبت برای ارسال پیامک یافت نشد.', $started);
+            }
+
+            $mobile = normalize_mobile((string) ($data['mobile'] ?? ''));
+            if ($mobile === null) {
+                return $fail('شماره موبایل بیمار معتبر نیست.', $started);
             }
 
             $params = SmsTemplateRenderer::buildSmsIrAppointmentParameters($data, $data);
@@ -316,69 +377,165 @@ final class AppointmentService
                     'missing_parameter_names' => $missing,
                     'message_type' => 'appointment_confirmation',
                 ]);
-                return;
+                return $fail('پارامترهای پیامک تأیید ناقص است.', $started);
             }
 
-            $idempotencyKey = 'appointment_confirmation:' . $appointmentId;
-            $sms = new SmsService($this->db);
-
-            // Block legacy confirm:{id} duplicates from older releases
-            try {
-                $legacy = $this->db->prepare(
-                    "SELECT id FROM sms_queue WHERE idempotency_key IN (?, ?) AND status IN ('pending','processing','retrying','sent') LIMIT 1"
-                );
-                $legacy->execute([$idempotencyKey, 'confirm:' . $appointmentId]);
-                if ($legacy->fetchColumn()) {
-                    SmsTemplateRenderer::logEvent('APPOINTMENT_CONFIRMATION_SKIPPED_DUPLICATE', [
-                        'appointment_id' => $appointmentId,
-                        'template_id' => $templateId,
-                        'idempotency_key' => $idempotencyKey,
-                    ]);
-                    return;
-                }
-                $legacyLog = $this->db->prepare(
-                    "SELECT id FROM sms_logs WHERE idempotency_key IN (?, ?) AND status='sent' LIMIT 1"
-                );
-                $legacyLog->execute([$idempotencyKey, 'confirm:' . $appointmentId]);
-                if ($legacyLog->fetchColumn()) {
-                    return;
-                }
-            } catch (\Throwable) {
+            $claimId = $this->claimConfirmationSend($appointmentId, (int) $data['patient_id'], $mobile, $templateId, $idempotencyKey, $params);
+            if ($claimId === 0) {
+                $total = (int) round((hrtime(true) - $started) / 1_000_000);
+                return [
+                    'ok' => true,
+                    'sent' => false,
+                    'duplicate' => true,
+                    'message' => 'پیامک تأیید قبلاً ارسال شده است.',
+                    'message_id' => null,
+                    'sms_api_ms' => 0,
+                    'total_ms' => $total,
+                ];
             }
 
-            $qid = $sms->enqueueSmsIrTemplate([
-                'patient_id' => (int) $data['patient_id'],
-                'appointment_id' => $appointmentId,
-                'mobile' => (string) $data['mobile'],
-                'message_type' => 'appointment_confirmation',
-                'source' => 'automation',
-                'provider_template_id' => $templateId,
-                'template_parameters' => $params,
-                'idempotency_key' => $idempotencyKey,
-                'appointment_starts_at' => $data['starts_at'],
-                'log_message' => sprintf(
-                    'تأیید نوبت (SMS.ir #%d): %s — %s %s',
-                    $templateId,
-                    $params['FULL_NAME'],
-                    $params['APPOINTMENT_DATE'],
-                    $params['APPOINTMENT_TIME']
-                ),
-            ]);
+            $requestStarted = date('c');
+            $provider = SmsManager::make();
+            $parameterList = SmsTemplateRenderer::toSmsIrParameterList($params);
+            if ($provider instanceof SmsIrProvider || $provider instanceof LogSmsProvider) {
+                $send = $provider->sendTemplateNow($mobile, $templateId, $parameterList);
+            } else {
+                $send = $provider->sendTemplate($mobile, $templateId, $parameterList);
+            }
+            $responseAt = date('c');
+            $apiMs = (int) ($send['duration_ms'] ?? 0);
+            $ok = !empty($send['ok']);
+            $messageId = isset($send['message_id']) ? (string) $send['message_id'] : null;
+            $summary = sprintf(
+                'تأیید نوبت (SMS.ir #%d): %s — %s %s',
+                $templateId,
+                $params['FULL_NAME'],
+                $params['APPOINTMENT_DATE'],
+                $params['APPOINTMENT_TIME']
+            );
 
-            SmsTemplateRenderer::logEvent('APPOINTMENT_CONFIRMATION_QUEUED', [
+            $this->finishConfirmationLog($claimId, $ok, $messageId, $summary, $send, $ok ? $idempotencyKey : null);
+            $total = (int) round((hrtime(true) - $started) / 1_000_000);
+            SmsTemplateRenderer::logEvent('APPOINTMENT_CONFIRMATION_SMS', [
                 'appointment_id' => $appointmentId,
-                'message_type' => 'appointment_confirmation',
                 'template_id' => $templateId,
-                'idempotency_key' => $idempotencyKey,
-                'queue_id' => $qid > 0 ? $qid : null,
-                'queued' => $qid > 0,
+                'sms_request_started_at' => $requestStarted,
+                'sms_provider_response_at' => $responseAt,
+                'sms_api_ms' => $apiMs,
+                'total_ms' => $total,
+                'provider_status' => $ok ? 'success' : 'failed',
+                'message_id' => $messageId,
+                'http' => $send['http'] ?? null,
             ]);
+
+            return [
+                'ok' => $ok,
+                'sent' => $ok,
+                'duplicate' => false,
+                'message' => $ok ? 'پیامک تأیید ارسال شد.' : 'نوبت با موفقیت ثبت شد، اما ارسال پیامک تأیید با خطا مواجه شد.',
+                'message_id' => $ok ? $messageId : null,
+                'sms_api_ms' => $apiMs,
+                'total_ms' => $total,
+            ];
         } catch (\Throwable $e) {
-            SmsTemplateRenderer::logEvent('APPOINTMENT_CONFIRMATION_QUEUE_ERROR', [
+            SmsTemplateRenderer::logEvent('APPOINTMENT_CONFIRMATION_SMS_ERROR', [
                 'appointment_id' => $appointmentId,
                 'error' => mb_substr($e->getMessage(), 0, 200),
             ]);
+            return $fail('نوبت با موفقیت ثبت شد، اما ارسال پیامک تأیید با خطا مواجه شد.', $started);
         }
+    }
+
+    private function confirmationAlreadyAccepted(int $appointmentId, string $key, string $legacyKey): bool
+    {
+        $log = $this->db->prepare(
+            "SELECT id FROM sms_logs
+             WHERE (idempotency_key IN (?, ?) OR (appointment_id=? AND message_type='appointment_confirmation'))
+               AND status='sent'
+             LIMIT 1"
+        );
+        $log->execute([$key, $legacyKey, $appointmentId]);
+        if ($log->fetchColumn()) {
+            return true;
+        }
+        try {
+            $q = $this->db->prepare(
+                "SELECT id FROM sms_queue
+                 WHERE idempotency_key IN (?, ?) AND message_type='appointment_confirmation' AND status='sent'
+                 LIMIT 1"
+            );
+            $q->execute([$key, $legacyKey]);
+            return (bool) $q->fetchColumn();
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    private function cancelPendingConfirmationQueue(string $key, string $legacyKey): void
+    {
+        try {
+            $this->db->prepare(
+                "UPDATE sms_queue SET status='cancelled'
+                 WHERE idempotency_key IN (?, ?)
+                   AND message_type='appointment_confirmation'
+                   AND status IN ('pending','retrying')"
+            )->execute([$key, $legacyKey]);
+        } catch (\Throwable) {
+        }
+    }
+
+    /** @param array<string, string> $params */
+    private function claimConfirmationSend(
+        int $appointmentId,
+        int $patientId,
+        string $mobile,
+        int $templateId,
+        string $idempotencyKey,
+        array $params
+    ): int {
+        $body = sprintf('تأیید نوبت #%d — %s %s', $templateId, $params['APPOINTMENT_DATE'], $params['APPOINTMENT_TIME']);
+        try {
+            $this->db->prepare(
+                "INSERT INTO sms_logs
+                 (patient_id, appointment_id, mobile, message_type, source, message_body, provider, status, attempts, idempotency_key)
+                 VALUES (?, ?, ?, 'appointment_confirmation', 'system', ?, 'smsir', 'sending', 1, ?)"
+            )->execute([$patientId, $appointmentId, $mobile, $body, $idempotencyKey]);
+            return (int) $this->db->lastInsertId();
+        } catch (PDOException $e) {
+            if ($e->getCode() !== '23000' && !str_contains($e->getMessage(), 'Duplicate')) {
+                throw $e;
+            }
+        }
+        return 0;
+    }
+
+    /** @param array<string, mixed> $send */
+    private function finishConfirmationLog(int $logId, bool $ok, ?string $messageId, string $summary, array $send, ?string $idempotencyKey): void
+    {
+        unset($send['api_key'], $send['headers'], $send['request'], $send['raw']);
+        $this->db->prepare(
+            "UPDATE sms_logs
+             SET message_body=?, provider=?, provider_message_id=?, status=?, last_error=?, provider_response=?, idempotency_key=?, sent_at=?
+             WHERE id=?"
+        )->execute([
+            $summary,
+            (string) ($send['provider'] ?? SmsManager::driver()),
+            $ok ? $messageId : null,
+            $ok ? 'sent' : 'failed',
+            $ok ? null : mb_substr((string) ($send['error'] ?? 'ارسال ناموفق'), 0, 500),
+            json_encode([
+                'provider' => $send['provider'] ?? null,
+                'provider_status' => $send['provider_status'] ?? ($send['status_code'] ?? null),
+                'http' => $send['http'] ?? null,
+                'message_id' => $messageId,
+                'duration_ms' => $send['duration_ms'] ?? null,
+                'template_id' => $send['provider_template_id'] ?? null,
+                'ok' => $ok,
+            ], JSON_UNESCAPED_UNICODE),
+            $ok ? $idempotencyKey : null,
+            $ok ? date('Y-m-d H:i:s') : null,
+            $logId,
+        ]);
     }
 
     /** @return list<string> */

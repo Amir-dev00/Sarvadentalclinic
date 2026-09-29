@@ -349,8 +349,12 @@ $router->get('/admin/sms/automation', static function (): void {
     foreach ($templates as $t) {
         $tplMap[(int) $t['id']] = $t;
     }
+    $tomorrowCounts = [];
     foreach ($items as $item) {
         $previews[(int) $item['id']] = $auto->preview($item, $tplMap[(int) $item['template_id']] ?? ['body' => '']);
+        if (($item['offset_unit'] ?? '') !== 'hours') {
+            $tomorrowCounts[(int) $item['id']] = $auto->countEligibleForRule($item);
+        }
     }
     view('admin/sms-automation', [
         'title' => 'پیام‌های خودکار',
@@ -359,6 +363,7 @@ $router->get('/admin/sms/automation', static function (): void {
         'doctors' => $doctors,
         'services' => $services,
         'previews' => $previews,
+        'tomorrowCounts' => $tomorrowCounts,
     ]);
 });
 
@@ -430,6 +435,16 @@ $router->post('/admin/sms/automation/save', static function (): void {
             flash('error', 'ذخیره ناموفق بود: ' . $e2->getMessage());
         }
     }
+    redirect('/admin/sms/automation');
+});
+
+$router->post('/admin/sms/automation/run-tomorrow', static function (): void {
+    Auth::requireAdmin('sms.automation.manage');
+    Csrf::assertValid();
+    $id = (int) ($_POST['id'] ?? 0);
+    $auto = new SmsAutomationService(db(), new SmsService(db()));
+    $result = $auto->runManualDailyBatch($id);
+    flash($result['ok'] ? 'success' : 'error', $result['message']);
     redirect('/admin/sms/automation');
 });
 

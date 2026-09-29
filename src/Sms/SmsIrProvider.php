@@ -22,6 +22,10 @@ final class SmsIrProvider implements SmsProviderInterface
     private const OTP_TIMEOUT = 10;
     private const OTP_CONNECT_TIMEOUT = 5;
 
+    /** Appointment confirmation is synchronous in the admin/payment request. */
+    private const CONFIRM_TIMEOUT = 10;
+    private const CONFIRM_CONNECT_TIMEOUT = 5;
+
     /** Bulk / non-urgent */
     private const BULK_TIMEOUT = 20;
     private const BULK_CONNECT_TIMEOUT = 8;
@@ -120,6 +124,42 @@ final class SmsIrProvider implements SmsProviderInterface
         ], $timeout, $connect);
 
         $result['message_channel'] = $isOtp ? 'otp_verify' : 'verify';
+        return $result;
+    }
+
+    /**
+     * Direct Verify send for appointment confirmation. Short timeouts; never queued.
+     *
+     * @param list<array{name:string,value:string}> $parameters
+     * @return array<string, mixed>
+     */
+    public function sendTemplateNow(string $mobile, int $templateId, array $parameters): array
+    {
+        if ($templateId <= 0) {
+            return ['ok' => false, 'provider' => 'smsir', 'error' => 'شناسه قالب SMS.ir تنظیم نشده است.', 'permanent' => true, 'duration_ms' => 0];
+        }
+
+        $safeParams = [];
+        foreach ($parameters as $param) {
+            $name = trim((string) ($param['name'] ?? ''));
+            $value = trim((string) ($param['value'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+            $safeParams[] = [
+                'name' => $name,
+                'value' => mb_substr($value !== '' ? $value : '-', 0, 25),
+            ];
+        }
+
+        $result = $this->request('/send/verify', [
+            'mobile' => $mobile,
+            'templateId' => $templateId,
+            'parameters' => $safeParams,
+        ], self::CONFIRM_TIMEOUT, self::CONFIRM_CONNECT_TIMEOUT);
+
+        $result['message_channel'] = 'verify';
+        $result['provider_template_id'] = $templateId;
         return $result;
     }
 

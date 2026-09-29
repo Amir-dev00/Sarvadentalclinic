@@ -750,7 +750,13 @@ $router->post('/admin/appointments/create', static function (): void {
         'starts_at' => $startsAt,
         'source' => 'admin',
     ]);
-    flash('success', 'نوبت با وضعیت تأییدشده ثبت شد و در سامانه یادآوری پیامک لحاظ می‌شود.');
+    if (!empty($result['sms_sent'])) {
+        flash('success', 'نوبت با وضعیت تأییدشده ثبت شد و پیامک تأیید ارسال شد.');
+    } elseif (!empty($result['sms_duplicate'])) {
+        flash('success', 'نوبت ثبت شد. پیامک تأیید قبلاً ارسال شده است.');
+    } else {
+        flash('success', 'نوبت با موفقیت ثبت شد، اما ارسال پیامک تأیید با خطا مواجه شد.');
+    }
     redirect($redirectTo);
 });
 

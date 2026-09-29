@@ -82,6 +82,78 @@ final class SmsAutomationService
             }
         } catch (\Throwable) {
         }
+        try {
+            $this->db->exec(
+                "CREATE TABLE IF NOT EXISTS sms_automation_runs (
+                    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                    rule_id INT UNSIGNED NOT NULL,
+                    run_date DATE NOT NULL,
+                    configured_send_time TIME NULL,
+                    started_at DATETIME NOT NULL,
+                    finished_at DATETIME NULL,
+                    eligible_count INT UNSIGNED NOT NULL DEFAULT 0,
+                    queued_count INT UNSIGNED NOT NULL DEFAULT 0,
+                    skipped_count INT UNSIGNED NOT NULL DEFAULT 0,
+                    PRIMARY KEY (id),
+                    UNIQUE KEY uniq_rule_run_date (rule_id, run_date)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            );
+        } catch (\Throwable) {
+        }
+    }
+
+    /** Grace window after the admin-selected daily send time (cron is frequent; batch is not). */
+    public const DAILY_WINDOW_MINUTES = 10;
+
+    /**
+     * True only inside [send_time, send_time + window). Not "any time after send_time".
+     */
+    public static function isWithinDailySendWindow(string $nowHis, string $sendTime, int $windowMinutes = self::DAILY_WINDOW_MINUTES): bool
+    {
+        $now = self::secondsOfDay($nowHis);
+        $start = self::secondsOfDay($sendTime);
+        if ($now === null || $start === null) {
+            return false;
+        }
+        $end = $start + max(1, $windowMinutes) * 60;
+        return $now >= $start && $now < $end;
+    }
+
+    /**
+     * Day-offset reminder batch: inside today's window AND not already executed today.
+     */
+    public static function dailyBatchShouldRun(
+        string $nowHis,
+        string $sendTime,
+        ?string $lastEnqueuedAt,
+        string $todayYmd,
+        int $windowMinutes = self::DAILY_WINDOW_MINUTES
+    ): bool {
+        if (!self::isWithinDailySendWindow($nowHis, $sendTime, $windowMinutes)) {
+            return false;
+        }
+        if ($lastEnqueuedAt !== null && $lastEnqueuedAt !== '') {
+            $ranDay = substr($lastEnqueuedAt, 0, 10);
+            if ($ranDay === $todayYmd) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static function secondsOfDay(string $his): ?int
+    {
+        $his = substr(trim($his), 0, 8);
+        if (preg_match('/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/', $his, $m) !== 1) {
+            return null;
+        }
+        $h = (int) $m[1];
+        $i = (int) $m[2];
+        $s = isset($m[3]) ? (int) $m[3] : 0;
+        if ($h > 23 || $i > 59 || $s > 59) {
+            return null;
+        }
+        return $h * 3600 + $i * 60 + $s;
     }
 
     /** @return array{mode:string,filters:array,include_ids:list<int>,exclude_ids:list<int>,select_all_filtered:bool} */
@@ -128,15 +200,50 @@ final class SmsAutomationService
         ];
     }
 
+    /** @var array{checked_rules:int,daily_reminder_due:int,reminder_queued:int,skipped_already:int} */
+    private array $cronStats = [
+        'checked_rules' => 0,
+        'daily_reminder_due' => 0,
+        'reminder_queued' => 0,
+        'skipped_already' => 0,
+    ];
+
+    /** @return array{checked_rules:int,daily_reminder_due:int,reminder_queued:int,skipped_already:int} */
+    public function lastCronStats(): array
+    {
+        return $this->cronStats;
+    }
+
+    public static function appNow(): \DateTimeImmutable
+    {
+        $tzName = (string) setting('timezone', config('app.timezone', 'Asia/Tehran'));
+        try {
+            $tz = new \DateTimeZone($tzName !== '' ? $tzName : 'Asia/Tehran');
+        } catch (\Throwable) {
+            $tz = new \DateTimeZone('Asia/Tehran');
+        }
+        return new \DateTimeImmutable('now', $tz);
+    }
+
+    public static function reminderIdempotencyKey(int $ruleId, int $appointmentId, string $runDate): string
+    {
+        return 'appointment_reminder:' . $ruleId . ':' . $appointmentId . ':' . $runDate;
+    }
+
     public function enqueueDue(int $lookAheadHours = 48): int
     {
+        $this->cronStats = [
+            'checked_rules' => 0,
+            'daily_reminder_due' => 0,
+            'reminder_queued' => 0,
+            'skipped_already' => 0,
+        ];
         if (!$this->sms->isEnabled()) {
             return 0;
         }
-        $tz = (string) setting('timezone', config('app.timezone', 'Asia/Tehran'));
-        if ($tz !== '') {
-            date_default_timezone_set($tz);
-        }
+
+        $now = self::appNow();
+        date_default_timezone_set($now->getTimezone()->getName());
 
         $rules = $this->db->query(
             "SELECT r.*, t.body AS template_body, t.slug AS template_slug
@@ -147,14 +254,17 @@ final class SmsAutomationService
 
         $queued = 0;
         foreach ($rules as $rule) {
-            $queued += $this->enqueueRule($rule);
+            $this->cronStats['checked_rules']++;
+            $queued += $this->enqueueRule($rule, $now);
         }
+        $this->cronStats['reminder_queued'] = $queued;
         return $queued;
     }
 
     /** @param array<string, mixed> $rule */
-    private function enqueueRule(array $rule): int
+    private function enqueueRule(array $rule, ?\DateTimeImmutable $now = null): int
     {
+        $now ??= self::appNow();
         $statuses = array_filter(array_map('trim', explode(',', (string) ($rule['appointment_statuses'] ?: 'confirmed'))));
         if ($statuses === []) {
             $statuses = ['confirmed'];
@@ -206,24 +316,43 @@ final class SmsAutomationService
 
         $unit = $rule['offset_unit'] === 'hours' ? 'hours' : 'days';
         $offset = max(1, (int) $rule['offset_value']);
+        $manual = !empty($rule['_manual_batch']);
+
+        $sendTime = substr((string) ($rule['send_time'] ?: '18:00:00'), 0, 8);
+        $today = $now->format('Y-m-d');
+        $nowHis = $now->format('H:i:s');
+        $nowSql = $now->format('Y-m-d H:i:s');
 
         if ($unit === 'days') {
-            $sql = "SELECT a.id, a.starts_at, a.patient_id, p.mobile, p.first_name, p.last_name, p.file_number, p.public_code,
-                           CONCAT(d.first_name,' ',d.last_name) doctor_name, s.name service_name
-                    FROM appointments a
-                    JOIN patients p ON p.id=a.patient_id AND p.deleted_at IS NULL
-                    JOIN doctors d ON d.id=a.doctor_id
-                    JOIN services s ON s.id=a.service_id
-                    WHERE a.deleted_at IS NULL
-                      AND a.reminder_sent_at IS NULL
-                      AND a.status IN ($placeholders)
-                      $extra
-                      AND DATE(a.starts_at) = DATE(DATE_ADD(NOW(), INTERVAL {$offset} DAY))";
-            $sendTime = substr((string) ($rule['send_time'] ?: '18:00:00'), 0, 8);
-            if ($sendTime !== '' && date('H:i:s') < $sendTime) {
+            $last = isset($rule['last_enqueued_at']) ? (string) $rule['last_enqueued_at'] : null;
+            if (!$manual && !self::isWithinDailySendWindow($nowHis, $sendTime)) {
                 return 0;
             }
-        } else {
+            if (!$manual && $last !== null && $last !== '' && substr($last, 0, 10) === $today) {
+                $this->cronStats['skipped_already']++;
+                SmsTemplateRenderer::logEvent('TOMORROW_REMINDER_SKIP', [
+                    'rule_id' => (int) $rule['id'],
+                    'run_date' => $today,
+                    'configured_send_time' => substr($sendTime, 0, 5),
+                    'reason' => 'already_executed_today',
+                ]);
+                return 0;
+            }
+            if (!$manual) {
+                $this->cronStats['daily_reminder_due']++;
+            }
+            if (!$manual && !$this->claimDailyRun((int) $rule['id'], $today, $sendTime, $nowSql)) {
+                $this->cronStats['skipped_already']++;
+                SmsTemplateRenderer::logEvent('TOMORROW_REMINDER_SKIP', [
+                    'rule_id' => (int) $rule['id'],
+                    'run_date' => $today,
+                    'configured_send_time' => substr($sendTime, 0, 5),
+                    'reason' => 'already_executed_today',
+                ]);
+                return 0;
+            }
+            $targetDate = $now->modify('+' . $offset . ' days')->format('Y-m-d');
+            $params[] = $targetDate;
             $sql = "SELECT a.id, a.starts_at, a.patient_id, p.mobile, p.first_name, p.last_name, p.file_number, p.public_code,
                            CONCAT(d.first_name,' ',d.last_name) doctor_name, s.name service_name
                     FROM appointments a
@@ -233,93 +362,249 @@ final class SmsAutomationService
                     WHERE a.deleted_at IS NULL
                       AND a.reminder_sent_at IS NULL
                       AND a.status IN ($placeholders)
+                      AND a.status NOT IN ('cancelled','completed','expired')
                       $extra
-                      AND a.starts_at > NOW()
-                      AND a.starts_at <= DATE_ADD(NOW(), INTERVAL {$offset} HOUR)";
+                      AND DATE(a.starts_at) = ?";
+        } else {
+            $until = $now->modify('+' . $offset . ' hours')->format('Y-m-d H:i:s');
+            $params[] = $nowSql;
+            $params[] = $until;
+            $sql = "SELECT a.id, a.starts_at, a.patient_id, p.mobile, p.first_name, p.last_name, p.file_number, p.public_code,
+                           CONCAT(d.first_name,' ',d.last_name) doctor_name, s.name service_name
+                    FROM appointments a
+                    JOIN patients p ON p.id=a.patient_id AND p.deleted_at IS NULL
+                    JOIN doctors d ON d.id=a.doctor_id
+                    JOIN services s ON s.id=a.service_id
+                    WHERE a.deleted_at IS NULL
+                      AND a.reminder_sent_at IS NULL
+                      AND a.status IN ($placeholders)
+                      AND a.status NOT IN ('cancelled','completed','expired')
+                      $extra
+                      AND a.starts_at > ?
+                      AND a.starts_at <= ?";
         }
 
         $stmt = $this->db->prepare($sql);
         $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         $count = 0;
+        $skipped = 0;
         $type = 'appointment_reminder';
         $smsIrTemplateId = SmsService::smsIrTemplateIdForMessageType($type);
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $key = 'appointment_reminder:' . (int) $row['id'] . ':rule:' . (int) $rule['id'];
-            // Keep legacy key blocked too
-            $legacyKey = 'auto:' . (int) $rule['id'] . ':' . (int) $row['id'] . ':' . $type;
+        $startedAt = date('c');
+        foreach ($rows as $row) {
+            $apptDay = date('Y-m-d', strtotime((string) $row['starts_at']) ?: time());
+            $ruleId = (int) $rule['id'];
+            $appointmentId = (int) $row['id'];
+            $key = self::reminderIdempotencyKey($ruleId, $appointmentId, $today);
+            $legacyKeys = [
+                'appointment_reminder:' . $appointmentId . ':rule:' . $ruleId,
+                'auto:' . $ruleId . ':' . $appointmentId . ':' . $type,
+                'appointment_reminder:' . $appointmentId . ':tomorrow:' . $apptDay,
+                'tomorrow_reminder:' . $appointmentId . ':' . $apptDay,
+            ];
 
-            if ($smsIrTemplateId > 0) {
-                $params = SmsTemplateRenderer::buildSmsIrAppointmentParameters($row, $row);
-                $missing = SmsTemplateRenderer::missingSmsIrParameters($params, ['FULL_NAME', 'APPOINTMENT_TIME']);
-                if ($missing !== []) {
-                    SmsTemplateRenderer::logSmsIrParameterError([
-                        'template_id' => $smsIrTemplateId,
-                        'template_slug' => (string) ($rule['template_slug'] ?? ''),
-                        'automation_rule_id' => (int) $rule['id'],
-                        'appointment_id' => (int) $row['id'],
-                        'missing_parameter_names' => $missing,
-                        'message_type' => $type,
-                    ]);
-                    continue;
-                }
-                // Skip if legacy already queued
-                try {
-                    $dup = $this->db->prepare(
-                        "SELECT id FROM sms_queue WHERE idempotency_key IN (?,?) AND status IN ('pending','processing','retrying','sent') LIMIT 1"
-                    );
-                    $dup->execute([$key, $legacyKey]);
-                    if ($dup->fetchColumn()) {
-                        continue;
-                    }
-                } catch (\Throwable) {
-                }
-
-                $id = $this->sms->enqueueSmsIrTemplate([
-                    'patient_id' => (int) $row['patient_id'],
-                    'appointment_id' => (int) $row['id'],
-                    'template_id' => (int) $rule['template_id'],
-                    'automation_rule_id' => (int) $rule['id'],
-                    'mobile' => (string) $row['mobile'],
-                    'message_type' => $type,
-                    'source' => 'automation',
-                    'provider_template_id' => $smsIrTemplateId,
-                    'template_parameters' => $params,
-                    'idempotency_key' => $key,
-                    'appointment_starts_at' => $row['starts_at'],
-                    'log_message' => sprintf(
-                        'یادآوری نوبت (SMS.ir #%d): %s — %s %s',
-                        $smsIrTemplateId,
-                        $params['FULL_NAME'],
-                        $params['APPOINTMENT_DATE'],
-                        $params['APPOINTMENT_TIME']
-                    ),
-                ]);
-            } else {
-                // No SMS.ir reminder template configured — do not invent another template.
+            if ($smsIrTemplateId <= 0) {
+                $skipped++;
                 SmsTemplateRenderer::logEvent('smsir_reminder_template_missing', [
-                    'automation_rule_id' => (int) $rule['id'],
-                    'appointment_id' => (int) $row['id'],
+                    'automation_rule_id' => $ruleId,
+                    'appointment_id' => $appointmentId,
                 ]);
                 continue;
             }
 
-            if ($id > 0) {
+            $tplParams = SmsTemplateRenderer::buildSmsIrAppointmentParameters($row, $row);
+            $missing = SmsTemplateRenderer::missingSmsIrParameters($tplParams, ['FULL_NAME', 'APPOINTMENT_TIME']);
+            if ($missing !== []) {
+                $skipped++;
+                SmsTemplateRenderer::logSmsIrParameterError([
+                    'template_id' => $smsIrTemplateId,
+                    'template_slug' => (string) ($rule['template_slug'] ?? ''),
+                    'automation_rule_id' => $ruleId,
+                    'appointment_id' => $appointmentId,
+                    'missing_parameter_names' => $missing,
+                    'message_type' => $type,
+                ]);
+                continue;
+            }
+
+            try {
+                $marks = implode(',', array_fill(0, count($legacyKeys) + 1, '?'));
+                $dup = $this->db->prepare(
+                    "SELECT id FROM sms_queue WHERE idempotency_key IN ($marks) AND status IN ('pending','processing','retrying','sent') LIMIT 1"
+                );
+                $dup->execute([$key, ...$legacyKeys]);
+                if ($dup->fetchColumn()) {
+                    $skipped++;
+                    continue;
+                }
+            } catch (\Throwable) {
+            }
+
+            $queueId = $this->sms->enqueueSmsIrTemplate([
+                'patient_id' => (int) $row['patient_id'],
+                'appointment_id' => $appointmentId,
+                'template_id' => (int) $rule['template_id'],
+                'automation_rule_id' => $ruleId,
+                'mobile' => (string) $row['mobile'],
+                'message_type' => $type,
+                'source' => 'automation',
+                'provider_template_id' => $smsIrTemplateId,
+                'template_parameters' => $tplParams,
+                'idempotency_key' => $key,
+                'appointment_starts_at' => $row['starts_at'],
+                'log_message' => sprintf(
+                    'یادآوری نوبت (SMS.ir #%d): %s — %s %s',
+                    $smsIrTemplateId,
+                    $tplParams['FULL_NAME'],
+                    $tplParams['APPOINTMENT_DATE'],
+                    $tplParams['APPOINTMENT_TIME']
+                ),
+            ]);
+
+            if ($queueId > 0) {
                 $count++;
                 SmsTemplateRenderer::logEvent('APPOINTMENT_REMINDER_QUEUED', [
-                    'appointment_id' => (int) $row['id'],
-                    'rule_id' => (int) $rule['id'],
+                    'appointment_id' => $appointmentId,
+                    'rule_id' => $ruleId,
                     'appointment_starts_at' => $row['starts_at'],
                     'current_time' => date('c'),
                     'template_id' => $smsIrTemplateId,
                     'idempotency_key' => $key,
-                    'reason_due' => ($rule['offset_unit'] === 'hours')
-                        ? ('within_' . (int) $rule['offset_value'] . '_hours')
-                        : ('date_offset_' . (int) $rule['offset_value'] . '_days'),
+                    'reason_due' => $manual
+                        ? 'manual_daily_batch'
+                        : (($rule['offset_unit'] === 'hours')
+                            ? ('within_' . (int) $rule['offset_value'] . '_hours')
+                            : 'daily_batch_window'),
                 ]);
+            } else {
+                $skipped++;
             }
         }
-        $this->db->prepare('UPDATE sms_automation_rules SET last_enqueued_at=NOW() WHERE id=?')->execute([(int) $rule['id']]);
+
+        if ($unit === 'days') {
+            if (!$manual) {
+                $this->finishDailyRun((int) $rule['id'], $today, count($rows), $count, $skipped);
+            }
+            SmsTemplateRenderer::logEvent('TOMORROW_REMINDER_BATCH', [
+                'rule_id' => (int) $rule['id'],
+                'run_date' => $today,
+                'configured_send_time' => $sendTime,
+                'started_at' => $startedAt,
+                'eligible_count' => count($rows),
+                'queued_count' => $count,
+                'skipped_count' => $skipped,
+                'manual' => $manual,
+            ]);
+        }
+
+        // Manual catch-up must not consume today's automatic batch lock.
+        if (!$manual) {
+            $this->db->prepare('UPDATE sms_automation_rules SET last_enqueued_at=? WHERE id=?')->execute([$nowSql, (int) $rule['id']]);
+        }
         return $count;
+    }
+
+    /**
+     * Explicit admin catch-up. Does not run from appointment creation or from cron outside the window.
+     *
+     * @return array{ok:bool, queued:int, eligible:int, message:string}
+     */
+    public function runManualDailyBatch(int $ruleId): array
+    {
+        $stmt = $this->db->prepare(
+            "SELECT r.*, t.body AS template_body, t.slug AS template_slug
+             FROM sms_automation_rules r
+             JOIN sms_templates t ON t.id = r.template_id AND t.deleted_at IS NULL
+             WHERE r.id=? LIMIT 1"
+        );
+        $stmt->execute([$ruleId]);
+        $rule = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$rule) {
+            return ['ok' => false, 'queued' => 0, 'eligible' => 0, 'message' => 'قانون یادآوری یافت نشد.'];
+        }
+        if (($rule['offset_unit'] ?? 'days') === 'hours') {
+            return ['ok' => false, 'queued' => 0, 'eligible' => 0, 'message' => 'ارسال دستی فقط برای یادآوری روزانه است.'];
+        }
+        $eligible = $this->countEligibleForRule($rule);
+        $rule['_manual_batch'] = true;
+        $queued = $this->enqueueRule($rule, self::appNow());
+        return [
+            'ok' => true,
+            'queued' => $queued,
+            'eligible' => $eligible,
+            'message' => $queued > 0
+                ? ($queued . ' یادآوری در صف قرار گرفت.')
+                : 'یادآوری جدیدی برای ارسال نبود.',
+        ];
+    }
+
+    /** @param array<string, mixed> $rule */
+    public function countEligibleForRule(array $rule): int
+    {
+        if (($rule['offset_unit'] ?? 'days') === 'hours') {
+            return 0;
+        }
+        $offset = max(1, (int) ($rule['offset_value'] ?? 1));
+        $targetDate = self::appNow()->modify('+' . $offset . ' days')->format('Y-m-d');
+        $statuses = array_filter(array_map('trim', explode(',', (string) ($rule['appointment_statuses'] ?: 'confirmed'))));
+        if ($statuses === []) {
+            $statuses = ['confirmed'];
+        }
+        $placeholders = implode(',', array_fill(0, count($statuses), '?'));
+        $params = $statuses;
+        $extra = '';
+        if (!empty($rule['doctor_id'])) {
+            $extra .= ' AND a.doctor_id = ?';
+            $params[] = (int) $rule['doctor_id'];
+        }
+        if (!empty($rule['service_id'])) {
+            $extra .= ' AND a.service_id = ?';
+            $params[] = (int) $rule['service_id'];
+        }
+        $sql = "SELECT COUNT(*) FROM appointments a
+                JOIN patients p ON p.id=a.patient_id AND p.deleted_at IS NULL
+                WHERE a.deleted_at IS NULL
+                  AND a.reminder_sent_at IS NULL
+                  AND a.status IN ($placeholders)
+                  AND a.status NOT IN ('cancelled','completed','expired')
+                  $extra
+                  AND DATE(a.starts_at) = ?";
+        $params[] = $targetDate;
+        $st = $this->db->prepare($sql);
+        $st->execute($params);
+        return (int) $st->fetchColumn();
+    }
+
+    private function claimDailyRun(int $ruleId, string $runDate, string $sendTime, string $startedAt): bool
+    {
+        try {
+            $this->db->prepare(
+                'INSERT INTO sms_automation_runs (rule_id, run_date, configured_send_time, started_at)
+                 VALUES (?, ?, ?, ?)'
+            )->execute([$ruleId, $runDate, $sendTime, $startedAt]);
+            return true;
+        } catch (\PDOException $e) {
+            $sqlState = (string) $e->getCode();
+            if ($sqlState === '23000' || str_contains($e->getMessage(), 'Duplicate')) {
+                return false;
+            }
+            return true;
+        } catch (\Throwable) {
+            return true;
+        }
+    }
+
+    private function finishDailyRun(int $ruleId, string $runDate, int $eligible, int $queued, int $skipped): void
+    {
+        try {
+            $this->db->prepare(
+                'UPDATE sms_automation_runs
+                 SET finished_at=NOW(), eligible_count=?, queued_count=?, skipped_count=?
+                 WHERE rule_id=? AND run_date=?'
+            )->execute([$eligible, $queued, $skipped, $ruleId, $runDate]);
+        } catch (\Throwable) {
+        }
     }
 
     /** @return array{send_at:string, appointment_at:string, preview:string} */

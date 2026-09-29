@@ -173,22 +173,12 @@ if (isset($tomId)) {
     }
 
     $rem = $tomorrow->enqueueTomorrow(false, 0, $tomId);
-    assert_eq('tomorrow: cron candidates 1', 1, (int) $rem['candidates']);
-    assert_eq('tomorrow: cron queued 1', 1, (int) $rem['queued']);
+    assert_eq('tomorrow: legacy service does not queue', 0, (int) $rem['queued']);
+    assert_eq('tomorrow: legacy service candidates 0', 0, (int) $rem['candidates']);
 
     $rows2 = queueRows($pdo, $tomId);
     $reminderRows2 = array_values(array_filter($rows2, static fn ($r) => ($r['message_type'] ?? '') === 'appointment_reminder'));
-    assert_eq('tomorrow: one reminder after cron', 1, count($reminderRows2));
-    if ($reminderRows2 !== []) {
-        assert_eq('tomorrow: reminder template', 822711, (int) $reminderRows2[0]['provider_template_id']);
-        assert_true(
-            'tomorrow: reminder idempotency prefix',
-            str_starts_with((string) $reminderRows2[0]['idempotency_key'], 'appointment_reminder:' . $tomId . ':')
-        );
-    }
-
-    $rem2 = $tomorrow->enqueueTomorrow(false, 0, $tomId);
-    assert_eq('tomorrow: second cron queued 0', 0, (int) $rem2['queued']);
+    assert_eq('tomorrow: still no reminder without daily window', 0, count($reminderRows2));
 }
 
 foreach ($createdIds as $id) {

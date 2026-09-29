@@ -115,7 +115,7 @@ $whoLabels = [
 <div class="admin-card auto-simple">
     <h2 style="margin:0 0 6px;font-size:1.15rem;color:#031D4F;">پیامک یادآوری نوبت</h2>
     <p style="margin:0 0 18px;color:#6b7280;font-size:.92rem;line-height:1.7;">
-        فقط ۴ سؤال را جواب دهید. سیستم خودش در زمان مناسب پیام را برای بیماران دارای نوبت می‌فرستد.
+        یادآوری نوبت فردا یک ارسال روزانه است، نه ارسال بلافاصله بعد از ساخت نوبت.
         برای ارسال دستی/گروهی از <a href="<?= url('/admin/sms/send') ?>">مرکز پیامک</a> استفاده کنید.
     </p>
 
@@ -132,8 +132,8 @@ $whoLabels = [
         </div>
 
         <div class="auto-step">
-            <h3 class="auto-step__title"><span class="auto-step__num">۲</span>پیام چند وقت قبل از نوبت برود؟</h3>
-            <p class="auto-step__hint">مثلاً «۱ روز قبل، ساعت ۱۸» یعنی روز قبل از نوبت، ساعت ۶ عصر پیام می‌رود.</p>
+            <h3 class="auto-step__title"><span class="auto-step__num">۲</span>یادآوری نوبت فردا</h3>
+            <p class="auto-step__hint">در این ساعت، یک‌بار در روز برای تمام نوبت‌های تأییدشده فردا پیام یادآوری ارسال می‌شود. نوبتی که بعد از این ساعت ساخته شود، همان روز یادآوری خودکار نمی‌گیرد.</p>
             <div class="auto-when">
                 <div>
                     <label class="form-label">چند</label>
@@ -147,7 +147,7 @@ $whoLabels = [
                     </select>
                 </div>
                 <div id="sendTimeWrap">
-                    <label class="form-label">ساعت ارسال</label>
+                    <label class="form-label">ساعت ارسال یادآوری نوبت‌های فردا</label>
                     <input type="time" name="send_time" id="rule_time" class="form-control form-control-lg" value="18:00">
                 </div>
             </div>
@@ -260,6 +260,16 @@ $whoLabels = [
                     </p>
                 </div>
                 <div class="d-flex gap-2 flex-wrap">
+                    <?php if (($item['offset_unit'] ?? '') !== 'hours'):
+                        $eligibleTomorrow = (int) (($tomorrowCounts[(int) $item['id']] ?? 0));
+                        ?>
+                    <form method="post" action="<?= url('/admin/sms/automation/run-tomorrow') ?>" style="display:inline;"
+                          onsubmit="return confirm('برای <?= $eligibleTomorrow ?> نوبت فردا پیام یادآوری ارسال شود؟');">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="id" value="<?= (int) $item['id'] ?>">
+                        <button class="btn btn-sm btn-outline-success" type="submit">ارسال یادآوری نوبت‌های فردا اکنون</button>
+                    </form>
+                    <?php endif; ?>
                     <button type="button" class="btn btn-sm btn-outline-primary"
                         onclick='editRule(<?= json_encode([
                             'id' => (int) $item['id'],
@@ -305,7 +315,7 @@ $whoLabels = [
         if (unit.value === 'hours') {
             sentence.textContent = 'پیام حدود ' + n + ' ساعت قبل از ساعت نوبت ارسال می‌شود.';
         } else {
-            sentence.textContent = 'پیام ' + n + ' روز قبل از نوبت، ساعت ' + (time.value || '18:00') + ' ارسال می‌شود.';
+            sentence.textContent = 'در ساعت ' + (time.value || '18:00') + '، یک‌بار در روز برای تمام نوبت‌های تأییدشده فردا پیام یادآوری ارسال می‌شود.';
         }
     }
     unit.addEventListener('change', paintWhen);

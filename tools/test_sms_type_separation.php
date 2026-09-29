@@ -94,17 +94,30 @@ assert_eq('confirm TIME', '18:30', $params['APPOINTMENT_TIME']);
 // AppointmentService create path must only call enqueueConfirmationSms (never reminder)
 $apptSrc = file_get_contents(dirname(__DIR__) . '/src/Services/AppointmentService.php') ?: '';
 assert_true(
-    'createConfirmedByAdmin calls enqueueConfirmationSms',
-    str_contains($apptSrc, '$this->enqueueConfirmationSms($id)')
+    'createConfirmedByAdmin calls sendAppointmentConfirmationNow after commit',
+    (bool) preg_match('/function createConfirmedByAdmin[\s\S]*?\$this->db->commit\(\);[\s\S]*?sendAppointmentConfirmationNow\(\$id\)/', $apptSrc)
 );
 assert_true(
-    'confirmPaid calls enqueueConfirmationSms',
-    str_contains($apptSrc, 'enqueueConfirmationSms($appointmentId)')
+    'confirmPaid calls sendAppointmentConfirmationNow',
+    str_contains($apptSrc, 'sendAppointmentConfirmationNow($appointmentId)')
+);
+assert_true(
+    'confirmation path does not enqueue',
+    !str_contains($apptSrc, 'enqueueConfirmationSms')
 );
 assert_true(
     'createConfirmedByAdmin does not call reminder service',
-    !preg_match('/function createConfirmedByAdmin[\s\S]*?enqueueConfirmationSms\(\$id\);[\s\S]*?(AppointmentTomorrowReminderService|enqueueDue|appointment_reminder)/', $apptSrc)
+    !preg_match('/function createConfirmedByAdmin[\s\S]*?sendAppointmentConfirmationNow\(\$id\);[\s\S]*?(AppointmentTomorrowReminderService|enqueueDue|enqueueTomorrow)/', $apptSrc)
 );
+assert_true(
+    'direct send uses sendTemplateNow',
+    str_contains($apptSrc, 'sendTemplateNow')
+);
+$confirmFn = '';
+if (preg_match('/function sendAppointmentConfirmationNow\(.*?\n    \}/s', $apptSrc, $m) === 1) {
+    $confirmFn = $m[0];
+}
+assert_true('confirmation method does not enqueue', $confirmFn !== '' && !str_contains($confirmFn, 'enqueue'));
 
 echo "\n{$passed} passed, {$failed} failed\n";
 exit($failed > 0 ? 1 : 0);

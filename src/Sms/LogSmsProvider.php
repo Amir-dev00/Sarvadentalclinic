@@ -34,6 +34,19 @@ final class LogSmsProvider implements SmsProviderInterface
         return $this->log('reminder', $mobile, $message);
     }
 
+    /**
+     * @param list<array{name:string,value:string}> $parameters
+     * @return array<string, mixed>
+     */
+    public function sendTemplateNow(string $mobile, int $templateId, array $parameters): array
+    {
+        $started = hrtime(true);
+        $result = $this->sendTemplate($mobile, $templateId, $parameters);
+        $result['duration_ms'] = (int) round((hrtime(true) - $started) / 1_000_000);
+        $result['provider_template_id'] = $templateId;
+        return $result;
+    }
+
     public function sendTemplate(string $mobile, int $templateId, array $parameters): array
     {
         return $this->log('template', $mobile, 'verify-template', [

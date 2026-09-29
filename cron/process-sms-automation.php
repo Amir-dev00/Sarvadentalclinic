@@ -3,13 +3,18 @@
 declare(strict_types=1);
 
 /**
- * cPanel Cron Job #2 — process SMS queue (send via SMS.ir) + automation rules.
+ * Canonical SMS cron. Schedule ONLY this file, every 5 minutes.
+ * Do not put a clock time in cPanel. send_time comes from the database.
  *
- * Recommended schedule: every 10 minutes
  * Command:
- * /usr/bin/php /home/ydlknymz/public_html/cron/process-sms-automation.php
+ * /usr/local/bin/php -q /home3/ydlknymz/sarvadentalclinic.ir/cron/process-sms-automation.php >> /home3/ydlknymz/sarvadentalclinic.ir/storage/sms-cron.log 2>&1
  *
- * Safe, non-interactive, absolute-path based. No SSH/terminal/Supervisor required.
+ * The tomorrow-reminder time is NOT set here. Each active rule's send_time
+ * is read from sms_automation_rules. Changing it in the admin panel takes
+ * effect on the next run. The batch runs once per day, only inside a
+ * 10-minute window starting at that send_time (application timezone).
+ *
+ * Do not also schedule cron/send-tomorrow-reminders.php.
  */
 
 require __DIR__ . '/_bootstrap.php';
@@ -20,7 +25,6 @@ $log = $ctx['log'];
 $release = $ctx['release'];
 
 use Sarva\Core\Database;
-use Sarva\Services\AppointmentTomorrowReminderService;
 use Sarva\Services\SmsAutomationService;
 use Sarva\Services\SmsService;
 
@@ -31,38 +35,19 @@ try {
         exit(1);
     }
 
-    $tz = (string) setting('timezone', config('app.timezone', 'Asia/Tehran'));
-    if ($tz !== '') {
-        date_default_timezone_set($tz);
-    }
-
     $pdo = db();
     $sms = new SmsService($pdo);
     $auto = new SmsAutomationService($pdo, $sms);
-    $tomorrow = new AppointmentTomorrowReminderService($pdo, $sms);
+    $now = SmsAutomationService::appNow();
+    date_default_timezone_set($now->getTimezone()->getName());
 
     $queuedAuto = 0;
-    $queuedTomorrow = 0;
-
     try {
         $queuedAuto = $auto->enqueueDue();
     } catch (Throwable $e) {
         $log('process-sms-automation WARN automation enqueue failed: ' . $e->getMessage());
     }
 
-    try {
-        $tomorrowReport = $tomorrow->enqueueTomorrow(false, 0, null);
-        $queuedTomorrow = (int) ($tomorrowReport['queued'] ?? 0);
-        if (!empty($tomorrowReport['errors'])) {
-            foreach ($tomorrowReport['errors'] as $err) {
-                $log('process-sms-automation WARN tomorrow enqueue: ' . $err);
-            }
-        }
-    } catch (Throwable $e) {
-        $log('process-sms-automation WARN tomorrow enqueue failed: ' . $e->getMessage());
-    }
-
-    // Send queued SMS via SMS.ir (continues on per-message failure inside SmsService)
     $processed = $sms->processQueue(50);
 
     try {
@@ -75,15 +60,15 @@ try {
         $log('process-sms-automation WARN expire holds failed: ' . $e->getMessage());
     }
 
+    $stats = $auto->lastCronStats();
     $log(sprintf(
-        'process-sms-automation OK queued_auto=%d queued_tomorrow=%d processed=%d sent=%d failed=%d cancelled=%d retried=%d',
-        $queuedAuto,
-        $queuedTomorrow,
+        'SMS_AUTOMATION_CRON checked_rules=%d daily_reminder_due=%d reminder_queued=%d queue_processed=%d sent=%d failed=%d',
+        (int) ($stats['checked_rules'] ?? 0),
+        (int) ($stats['daily_reminder_due'] ?? 0),
+        (int) ($stats['reminder_queued'] ?? $queuedAuto),
         (int) ($processed['processed'] ?? 0),
         (int) ($processed['sent'] ?? 0),
-        (int) ($processed['failed'] ?? 0),
-        (int) ($processed['cancelled'] ?? 0),
-        (int) ($processed['retried'] ?? 0)
+        (int) ($processed['failed'] ?? 0)
     ));
 } catch (Throwable $e) {
     $log('process-sms-automation FATAL: ' . $e->getMessage());
