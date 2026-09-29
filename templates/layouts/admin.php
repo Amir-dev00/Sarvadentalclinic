@@ -106,6 +106,9 @@ if ($canImport) {
     $nav['/admin/imports'] = 'ورود اکسل';
 }
 $nav['/admin/settings'] = 'تنظیمات';
+if (\Sarva\Core\Auth::adminHasPermission('admins.manage')) {
+    $nav['/admin/maintenance/history'] = 'پاک‌سازی تاریخچه‌ها';
+}
 $nav['/admin/account'] = 'تغییر رمز عبور';
 $nav['/admin/audit'] = 'گزارش فعالیت';
 $current = request_path();

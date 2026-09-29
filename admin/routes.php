@@ -1180,3 +1180,85 @@ $router->post('/admin/media/upload', static function (): void {
     flash('success', 'فایل بارگذاری و به WebP تبدیل شد.');
     redirect('/admin/media');
 });
+
+$router->get('/admin/maintenance/history', static function (): void {
+    Auth::requireAdmin('admins.manage');
+    $range = (string) ($_GET['older_than'] ?? '90_days');
+    if (!array_key_exists($range, \Sarva\Services\HistoryCleanupService::RANGES)) {
+        $range = '90_days';
+    }
+    $svc = new \Sarva\Services\HistoryCleanupService(db());
+    $cutoff = \Sarva\Services\HistoryCleanupService::cutoffForRange($range, \Sarva\Services\SmsAutomationService::appNow());
+    $stats = $svc->stats($cutoff);
+    $result = $_SESSION['_history_cleanup_result'] ?? null;
+    unset($_SESSION['_history_cleanup_result']);
+    $preview = $_SESSION['_history_cleanup_preview'] ?? null;
+    unset($_SESSION['_history_cleanup_preview']);
+    $selected = is_array($preview['categories'] ?? null)
+        ? $preview['categories']
+        : array_values(array_filter(
+            array_keys(\Sarva\Services\HistoryCleanupService::categories()),
+            static fn (string $key): bool => $key !== 'page_views'
+        ));
+    view('admin/history-cleanup', [
+        'title' => 'پاک‌سازی تاریخچه‌ها',
+        'categories' => \Sarva\Services\HistoryCleanupService::categories(),
+        'stats' => $stats,
+        'result' => is_array($result) ? $result : null,
+        'preview' => is_array($preview) ? $preview : null,
+        'selected' => $selected,
+        'range' => $range,
+    ]);
+});
+
+$router->post('/admin/maintenance/history/cleanup', static function (): void {
+    Auth::requireAdmin('admins.manage');
+    Csrf::assertValid();
+    $range = (string) ($_POST['older_than'] ?? '');
+    if (!array_key_exists($range, \Sarva\Services\HistoryCleanupService::RANGES)) {
+        flash('error', 'بازه زمانی نامعتبر است.');
+        redirect('/admin/maintenance/history');
+    }
+    $raw = $_POST['categories'] ?? [];
+    if (!is_array($raw)) {
+        flash('error', 'درخواست نامعتبر است.');
+        redirect('/admin/maintenance/history?older_than=' . rawurlencode($range));
+    }
+    $categories = \Sarva\Services\HistoryCleanupService::normalizeCategories(array_map('strval', $raw));
+    if ($categories === []) {
+        flash('error', 'هیچ تاریخچه معتبری انتخاب نشده است.');
+        redirect('/admin/maintenance/history?older_than=' . rawurlencode($range));
+    }
+    $svc = new \Sarva\Services\HistoryCleanupService(db());
+    $cutoff = \Sarva\Services\HistoryCleanupService::cutoffForRange($range, \Sarva\Services\SmsAutomationService::appNow());
+    $back = '/admin/maintenance/history?older_than=' . rawurlencode($range);
+    if ((string) ($_POST['action'] ?? '') === 'preview') {
+        $counts = [];
+        foreach ($categories as $category) {
+            $counts[$category] = $svc->countEligible($category, $cutoff);
+        }
+        $_SESSION['_history_cleanup_preview'] = [
+            'categories' => $categories,
+            'counts' => $counts,
+            'range' => $range,
+        ];
+        redirect($back);
+    }
+    if (
+        \Sarva\Services\HistoryCleanupService::requiresPhrase($range)
+        && !\Sarva\Services\HistoryCleanupService::phraseMatches((string) ($_POST['confirmation'] ?? ''))
+    ) {
+        flash('error', 'برای حذف همه باید عبارت «حذف همه تاریخچه‌ها» را دقیقاً وارد کنید.');
+        redirect($back);
+    }
+    $deleted = $svc->cleanupSelected($categories, $cutoff);
+    audit('maintenance.history_cleanup', 'maintenance', null, [
+        'admin_id' => $_SESSION['admin_id'] ?? null,
+        'categories' => $categories,
+        'deleted_counts' => $deleted,
+        'older_than' => $range,
+    ]);
+    $_SESSION['_history_cleanup_result'] = $deleted;
+    flash('success', 'پاک‌سازی انجام شد.');
+    redirect($back);
+});
