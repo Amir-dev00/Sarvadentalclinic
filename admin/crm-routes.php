@@ -384,6 +384,23 @@ $router->post('/admin/sms/automation/save', static function (): void {
     $st = substr((string) ($_POST['send_time'] ?? '18:00'), 0, 5);
     $sendTime = preg_match('/^\d{2}:\d{2}$/', $st) ? $st . ':00' : '18:00:00';
     $unit = ($_POST['offset_unit'] ?? 'days') === 'hours' ? 'hours' : 'days';
+    $oldSendTime = null;
+    if ($id > 0 && $unit === 'days') {
+        try {
+            $prev = db()->prepare('SELECT send_time, offset_unit FROM sms_automation_rules WHERE id=? LIMIT 1');
+            $prev->execute([$id]);
+            $prevRow = $prev->fetch(PDO::FETCH_ASSOC) ?: null;
+            if ($prevRow && ($prevRow['offset_unit'] ?? 'days') !== 'hours') {
+                $oldSendTime = substr((string) ($prevRow['send_time'] ?? ''), 0, 8);
+            }
+        } catch (Throwable) {
+            $oldSendTime = null;
+        }
+    }
+    $sendTimeChanged = $oldSendTime !== null && $oldSendTime !== '' && $oldSendTime !== $sendTime;
+    $successMessage = $sendTimeChanged
+        ? ('ساعت ارسال یادآوری به ' . substr($sendTime, 0, 5) . ' تغییر کرد. زمان جدید از همین امروز قابل اجرا است.')
+        : 'یادآوری ذخیره شد.';
 
     // Keep audience_json empty so enqueue uses the simple who/doctor/service filters.
     $data = [
@@ -406,6 +423,13 @@ $router->post('/admin/sms/automation/save', static function (): void {
                 'UPDATE sms_automation_rules SET name=?, trigger_type=?, offset_value=?, offset_unit=?, send_time=?, template_id=?, doctor_id=?, service_id=?, appointment_statuses=?, patient_filter=?, audience_json=?, is_active=? WHERE id=?'
             )->execute([...$data, $id]);
             audit('sms.automation_update', 'sms_automation_rules', $id);
+            if ($sendTimeChanged) {
+                \Sarva\Services\SmsTemplateRenderer::logEvent('SMS_AUTOMATION_RESCHEDULED', [
+                    'rule_id' => $id,
+                    'old_send_time' => substr((string) $oldSendTime, 0, 5),
+                    'new_send_time' => substr($sendTime, 0, 5),
+                ]);
+            }
         } else {
             db()->prepare(
                 'INSERT INTO sms_automation_rules (name, trigger_type, offset_value, offset_unit, send_time, template_id, doctor_id, service_id, appointment_statuses, patient_filter, audience_json, is_active)
@@ -413,7 +437,7 @@ $router->post('/admin/sms/automation/save', static function (): void {
             )->execute($data);
             audit('sms.automation_create', 'sms_automation_rules', (int) db()->lastInsertId());
         }
-        flash('success', 'یادآوری ذخیره شد.');
+        flash('success', $successMessage);
     } catch (Throwable $e) {
         try {
             if ($id > 0) {
@@ -422,6 +446,13 @@ $router->post('/admin/sms/automation/save', static function (): void {
                 )->execute([
                     $data[0], $data[1], $data[2], $data[3], $data[4], $data[5], $data[6], $data[7], $data[8], $data[9], $data[11], $id,
                 ]);
+                if ($sendTimeChanged) {
+                    \Sarva\Services\SmsTemplateRenderer::logEvent('SMS_AUTOMATION_RESCHEDULED', [
+                        'rule_id' => $id,
+                        'old_send_time' => substr((string) $oldSendTime, 0, 5),
+                        'new_send_time' => substr($sendTime, 0, 5),
+                    ]);
+                }
             } else {
                 db()->prepare(
                     'INSERT INTO sms_automation_rules (name, trigger_type, offset_value, offset_unit, send_time, template_id, doctor_id, service_id, appointment_statuses, patient_filter, is_active)
@@ -430,7 +461,7 @@ $router->post('/admin/sms/automation/save', static function (): void {
                     $data[0], $data[1], $data[2], $data[3], $data[4], $data[5], $data[6], $data[7], $data[8], $data[9], $data[11],
                 ]);
             }
-            flash('success', 'یادآوری ذخیره شد.');
+            flash('success', $successMessage);
         } catch (Throwable $e2) {
             flash('error', 'ذخیره ناموفق بود: ' . $e2->getMessage());
         }

@@ -95,9 +95,50 @@ final class SmsAutomationService
                     queued_count INT UNSIGNED NOT NULL DEFAULT 0,
                     skipped_count INT UNSIGNED NOT NULL DEFAULT 0,
                     PRIMARY KEY (id),
-                    UNIQUE KEY uniq_rule_run_date (rule_id, run_date)
+                    UNIQUE KEY uniq_rule_run_date_time (rule_id, run_date, configured_send_time)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
             );
+        } catch (\Throwable) {
+        }
+        $this->ensureRunScheduleUnique();
+    }
+
+    /**
+     * One batch per rule + calendar day + configured send time.
+     * A same-day send_time change may run again; repeats of the same time may not.
+     */
+    private function ensureRunScheduleUnique(): void
+    {
+        try {
+            $rows = $this->db->query('SHOW INDEX FROM sms_automation_runs')->fetchAll(PDO::FETCH_ASSOC);
+        } catch (\Throwable) {
+            return;
+        }
+        $byName = [];
+        foreach ($rows as $row) {
+            $name = (string) ($row['Key_name'] ?? '');
+            $seq = (int) ($row['Seq_in_index'] ?? 0);
+            $byName[$name][$seq] = (string) ($row['Column_name'] ?? '');
+        }
+        $normalize = static function (array $cols): array {
+            ksort($cols);
+            return array_values(array_map(static fn ($col): string => strtolower((string) $col), $cols));
+        };
+        $hasNew = isset($byName['uniq_rule_run_date_time'])
+            && $normalize($byName['uniq_rule_run_date_time']) === ['rule_id', 'run_date', 'configured_send_time'];
+        $hasOld = isset($byName['uniq_rule_run_date']);
+        if ($hasNew && !$hasOld) {
+            return;
+        }
+        try {
+            if ($hasOld) {
+                $this->db->exec('ALTER TABLE sms_automation_runs DROP INDEX uniq_rule_run_date');
+            }
+            if (!$hasNew) {
+                $this->db->exec(
+                    'ALTER TABLE sms_automation_runs ADD UNIQUE KEY uniq_rule_run_date_time (rule_id, run_date, configured_send_time)'
+                );
+            }
         } catch (\Throwable) {
         }
     }
@@ -120,25 +161,18 @@ final class SmsAutomationService
     }
 
     /**
-     * Day-offset reminder batch: inside today's window AND not already executed today.
+     * Day-offset reminder batch is eligible only inside the current send_time window.
+     * Same-day repeats of one schedule are blocked by sms_automation_runs, not last_enqueued_at.
      */
     public static function dailyBatchShouldRun(
         string $nowHis,
         string $sendTime,
-        ?string $lastEnqueuedAt,
-        string $todayYmd,
+        ?string $lastEnqueuedAt = null,
+        string $todayYmd = '',
         int $windowMinutes = self::DAILY_WINDOW_MINUTES
     ): bool {
-        if (!self::isWithinDailySendWindow($nowHis, $sendTime, $windowMinutes)) {
-            return false;
-        }
-        if ($lastEnqueuedAt !== null && $lastEnqueuedAt !== '') {
-            $ranDay = substr($lastEnqueuedAt, 0, 10);
-            if ($ranDay === $todayYmd) {
-                return false;
-            }
-        }
-        return true;
+        unset($lastEnqueuedAt, $todayYmd);
+        return self::isWithinDailySendWindow($nowHis, $sendTime, $windowMinutes);
     }
 
     private static function secondsOfDay(string $his): ?int
@@ -324,18 +358,7 @@ final class SmsAutomationService
         $nowSql = $now->format('Y-m-d H:i:s');
 
         if ($unit === 'days') {
-            $last = isset($rule['last_enqueued_at']) ? (string) $rule['last_enqueued_at'] : null;
             if (!$manual && !self::isWithinDailySendWindow($nowHis, $sendTime)) {
-                return 0;
-            }
-            if (!$manual && $last !== null && $last !== '' && substr($last, 0, 10) === $today) {
-                $this->cronStats['skipped_already']++;
-                SmsTemplateRenderer::logEvent('TOMORROW_REMINDER_SKIP', [
-                    'rule_id' => (int) $rule['id'],
-                    'run_date' => $today,
-                    'configured_send_time' => substr($sendTime, 0, 5),
-                    'reason' => 'already_executed_today',
-                ]);
                 return 0;
             }
             if (!$manual) {
@@ -346,8 +369,8 @@ final class SmsAutomationService
                 SmsTemplateRenderer::logEvent('TOMORROW_REMINDER_SKIP', [
                     'rule_id' => (int) $rule['id'],
                     'run_date' => $today,
-                    'configured_send_time' => substr($sendTime, 0, 5),
-                    'reason' => 'already_executed_today',
+                    'configured_send_time' => substr($sendTime, 0, 8),
+                    'reason' => 'schedule_already_executed',
                 ]);
                 return 0;
             }
@@ -484,7 +507,7 @@ final class SmsAutomationService
 
         if ($unit === 'days') {
             if (!$manual) {
-                $this->finishDailyRun((int) $rule['id'], $today, count($rows), $count, $skipped);
+                $this->finishDailyRun((int) $rule['id'], $today, $sendTime, count($rows), $count, $skipped);
             }
             SmsTemplateRenderer::logEvent('TOMORROW_REMINDER_BATCH', [
                 'rule_id' => (int) $rule['id'],
@@ -595,14 +618,14 @@ final class SmsAutomationService
         }
     }
 
-    private function finishDailyRun(int $ruleId, string $runDate, int $eligible, int $queued, int $skipped): void
+    private function finishDailyRun(int $ruleId, string $runDate, string $sendTime, int $eligible, int $queued, int $skipped): void
     {
         try {
             $this->db->prepare(
                 'UPDATE sms_automation_runs
                  SET finished_at=NOW(), eligible_count=?, queued_count=?, skipped_count=?
-                 WHERE rule_id=? AND run_date=?'
-            )->execute([$eligible, $queued, $skipped, $ruleId, $runDate]);
+                 WHERE rule_id=? AND run_date=? AND configured_send_time=?'
+            )->execute([$eligible, $queued, $skipped, $ruleId, $runDate, substr($sendTime, 0, 8)]);
         } catch (\Throwable) {
         }
     }

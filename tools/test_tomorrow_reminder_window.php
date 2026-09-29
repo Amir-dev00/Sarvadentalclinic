@@ -32,7 +32,7 @@ $today = '2026-09-29';
 assert_true('before window', !SmsAutomationService::dailyBatchShouldRun('17:59:59', $send, null, $today));
 assert_true('at send time', SmsAutomationService::dailyBatchShouldRun('18:00:00', $send, null, $today));
 assert_true('18:05 still in window if not run', SmsAutomationService::dailyBatchShouldRun('18:05:00', $send, null, $today));
-assert_true('18:05 blocked after today run', !SmsAutomationService::dailyBatchShouldRun('18:05:00', $send, '2026-09-29 18:00:12', $today));
+assert_true('18:05 stays open after last_enqueued_at today', SmsAutomationService::dailyBatchShouldRun('18:05:00', $send, '2026-09-29 18:00:12', $today));
 assert_true('inside grace', SmsAutomationService::dailyBatchShouldRun('18:09:59', $send, null, $today));
 assert_true('window closed at +10m', !SmsAutomationService::dailyBatchShouldRun('18:10:00', $send, null, $today));
 assert_true('19:00 does not run', !SmsAutomationService::dailyBatchShouldRun('19:00:00', $send, null, $today));
@@ -46,7 +46,7 @@ assert_true(
     'idempotency includes rule appointment run date',
     SmsAutomationService::reminderIdempotencyKey(3, 91, '2026-09-29') === 'appointment_reminder:3:91:2026-09-29'
 );
-assert_true('already ran today', !SmsAutomationService::dailyBatchShouldRun('18:02:00', $send, '2026-09-29 18:00:05', $today));
+assert_true('last_enqueued_at today does not close the window', SmsAutomationService::dailyBatchShouldRun('18:02:00', $send, '2026-09-29 18:00:05', $today));
 assert_true('ran yesterday so today ok', SmsAutomationService::dailyBatchShouldRun('18:02:00', $send, '2026-09-28 18:01:00', $today));
 assert_true('custom 09:30 window', SmsAutomationService::isWithinDailySendWindow('09:33:00', '09:30:00', 10));
 assert_true('custom 09:30 closed', !SmsAutomationService::isWithinDailySendWindow('09:40:00', '09:30:00', 10));
