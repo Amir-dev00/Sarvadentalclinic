@@ -707,9 +707,12 @@ function appointments_cancel_summary_message(array $summary, bool $sendSms): str
     $lines[] = ((int) ($summary['examined'] ?? 0)) . ' نوبت بررسی شد';
     $lines[] = ((int) ($summary['cancelled'] ?? 0)) . ' نوبت لغو شد';
     if ($sendSms) {
-        $lines[] = ((int) ($summary['sms_queued'] ?? 0)) . ' پیامک در صف ارسال قرار گرفت';
+        $lines[] = ((int) ($summary['sms_sent'] ?? 0)) . ' پیامک ارسال شد';
         if ((int) ($summary['sms_failed'] ?? 0) > 0) {
-            $lines[] = ((int) $summary['sms_failed']) . ' پیامک ثبت نشد';
+            $lines[] = 'ارسال ' . ((int) $summary['sms_failed']) . ' پیامک ناموفق بود';
+        }
+        if ((int) ($summary['sms_duplicate'] ?? 0) > 0) {
+            $lines[] = ((int) $summary['sms_duplicate']) . ' پیامک قبلاً ارسال شده بود';
         }
     } else {
         $lines[] = 'پیامک ارسال نشد (غیرفعال توسط مدیر)';
@@ -724,4 +727,22 @@ function appointments_cancel_summary_message(array $summary, bool $sendSms): str
         $lines[] = ((int) $summary['not_found']) . ' نوبت یافت نشد';
     }
     return implode(' · ', $lines);
+}
+
+/** @param array<string, mixed> $result */
+function appointment_cancel_result_message(array $result, bool $sendSms): string
+{
+    if (($result['status'] ?? '') === 'already_cancelled') {
+        return 'این نوبت قبلاً لغو شده بود.';
+    }
+    if (!$sendSms) {
+        return 'نوبت لغو شد؛ پیامک ارسال نشد.';
+    }
+    if (!empty($result['sms_duplicate'])) {
+        return 'نوبت لغو شد. پیامک لغو قبلاً ارسال شده است.';
+    }
+    if (!empty($result['sms_sent'])) {
+        return 'نوبت با موفقیت لغو شد و پیامک لغو برای بیمار ارسال شد.';
+    }
+    return 'نوبت با موفقیت لغو شد، اما ارسال پیامک لغو با خطا مواجه شد.';
 }

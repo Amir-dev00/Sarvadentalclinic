@@ -22,7 +22,7 @@ final class SmsIrProvider implements SmsProviderInterface
     private const OTP_TIMEOUT = 10;
     private const OTP_CONNECT_TIMEOUT = 5;
 
-    /** Appointment confirmation is synchronous in the admin/payment request. */
+    /** Direct appointment Verify sends (confirmation and cancellation) in the admin request. */
     private const CONFIRM_TIMEOUT = 10;
     private const CONFIRM_CONNECT_TIMEOUT = 5;
 
@@ -128,7 +128,8 @@ final class SmsIrProvider implements SmsProviderInterface
     }
 
     /**
-     * Direct Verify send for appointment confirmation. Short timeouts; never queued.
+     * Direct SMS.ir Verify send for an appointment template. Short timeouts; never queued.
+     * Used for confirmation and cancellation. Reminder traffic stays on the queue.
      *
      * @param list<array{name:string,value:string}> $parameters
      * @return array<string, mixed>

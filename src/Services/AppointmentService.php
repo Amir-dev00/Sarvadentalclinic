@@ -611,8 +611,11 @@ final class AppointmentService
      *   ok:bool,
      *   status:string,
      *   appointment_id:int,
-     *   sms_queued?:bool,
+     *   sms_sent?:bool,
+     *   sms_duplicate?:bool,
      *   sms_status?:string,
+     *   sms_message_id?:?string,
+     *   sms_api_ms?:int,
      *   message?:string,
      *   from_status?:string
      * }
@@ -632,7 +635,6 @@ final class AppointmentService
 
         $historyId = 0;
         $fromStatus = '';
-        $startsAt = '';
 
         try {
             $this->db->beginTransaction();
@@ -648,7 +650,6 @@ final class AppointmentService
             }
 
             $fromStatus = (string) $row['status'];
-            $startsAt = (string) $row['starts_at'];
 
             if ($fromStatus === 'cancelled') {
                 $this->db->rollBack();
@@ -657,7 +658,8 @@ final class AppointmentService
                     'status' => 'already_cancelled',
                     'appointment_id' => $appointmentId,
                     'from_status' => $fromStatus,
-                    'sms_queued' => false,
+                    'sms_sent' => false,
+                    'sms_duplicate' => false,
                     'sms_status' => 'skipped',
                     'message' => 'این نوبت قبلاً لغو شده است.',
                 ];
@@ -715,7 +717,7 @@ final class AppointmentService
             return ['ok' => false, 'status' => 'error', 'appointment_id' => $appointmentId, 'message' => 'خطا در لغو نوبت.'];
         }
 
-        // Outside transaction: cancel pending reminder/confirmation SMS, then queue cancellation SMS.
+        // After commit: drop pending reminder/confirmation jobs, then send cancellation SMS directly.
         try {
             (new SmsService($this->db))->cancelPendingForAppointment($appointmentId);
         } catch (\Throwable) {
@@ -729,12 +731,24 @@ final class AppointmentService
             'send_sms' => $sendSms,
         ]);
 
-        $smsQueued = false;
+        $smsSent = false;
+        $smsDuplicate = false;
         $smsStatus = 'disabled';
+        $smsMessageId = null;
+        $smsApiMs = 0;
         if ($sendSms) {
-            $smsResult = $this->enqueueCancellationSms($appointmentId, $reason, $historyId, $startsAt);
-            $smsQueued = (bool) ($smsResult['queued'] ?? false);
-            $smsStatus = (string) ($smsResult['status'] ?? 'failed');
+            $smsResult = $this->sendAppointmentCancellationNow($appointmentId);
+            $smsSent = !empty($smsResult['sent']);
+            $smsDuplicate = !empty($smsResult['duplicate']);
+            $smsMessageId = $smsResult['message_id'] ?? null;
+            $smsApiMs = (int) ($smsResult['sms_api_ms'] ?? 0);
+            if ($smsSent) {
+                $smsStatus = 'sent';
+            } elseif ($smsDuplicate) {
+                $smsStatus = 'duplicate';
+            } else {
+                $smsStatus = 'failed';
+            }
         }
 
         return [
@@ -742,8 +756,11 @@ final class AppointmentService
             'status' => 'cancelled',
             'appointment_id' => $appointmentId,
             'from_status' => $fromStatus,
-            'sms_queued' => $smsQueued,
+            'sms_sent' => $smsSent,
+            'sms_duplicate' => $smsDuplicate,
             'sms_status' => $smsStatus,
+            'sms_message_id' => $smsMessageId,
+            'sms_api_ms' => $smsApiMs,
             'message' => 'نوبت با موفقیت لغو شد.',
         ];
     }
@@ -757,7 +774,8 @@ final class AppointmentService
      *   already_cancelled:int,
      *   not_cancellable:int,
      *   not_found:int,
-     *   sms_queued:int,
+     *   sms_sent:int,
+     *   sms_duplicate:int,
      *   sms_failed:int,
      *   sms_disabled:int,
      *   results:list<array>
@@ -778,13 +796,18 @@ final class AppointmentService
             'already_cancelled' => 0,
             'not_cancellable' => 0,
             'not_found' => 0,
-            'sms_queued' => 0,
+            'sms_sent' => 0,
+            'sms_duplicate' => 0,
             'sms_failed' => 0,
             'sms_disabled' => 0,
             'results' => [],
         ];
 
-        foreach (array_chunk($ids, 50) as $chunk) {
+        if ($sendSms && count($ids) > 1) {
+            @set_time_limit(max(60, 15 * count($ids)));
+        }
+
+        foreach (array_chunk($ids, 5) as $chunk) {
             foreach ($chunk as $id) {
                 $r = $this->cancelAppointment($id, $adminId, $reason, $sendSms);
                 $summary['results'][] = $r;
@@ -793,8 +816,10 @@ final class AppointmentService
                     $summary['cancelled']++;
                     if (!$sendSms) {
                         $summary['sms_disabled']++;
-                    } elseif (!empty($r['sms_queued'])) {
-                        $summary['sms_queued']++;
+                    } elseif (!empty($r['sms_sent'])) {
+                        $summary['sms_sent']++;
+                    } elseif (!empty($r['sms_duplicate'])) {
+                        $summary['sms_duplicate']++;
                     } else {
                         $summary['sms_failed']++;
                     }
@@ -814,7 +839,9 @@ final class AppointmentService
             'cancelled' => $summary['cancelled'],
             'already_cancelled' => $summary['already_cancelled'],
             'not_cancellable' => $summary['not_cancellable'],
-            'sms_queued' => $summary['sms_queued'],
+            'sms_sent' => $summary['sms_sent'],
+            'sms_failed' => $summary['sms_failed'],
+            'sms_duplicate' => $summary['sms_duplicate'],
             'send_sms' => $sendSms,
         ]);
 
@@ -824,7 +851,7 @@ final class AppointmentService
     /**
      * Cancel all eligible appointments on a Gregorian calendar day (Y-m-d).
      *
-     * @return array{ok:bool,date:string,examined:int,cancelled:int,already_cancelled:int,not_cancellable:int,not_found:int,sms_queued:int,sms_failed:int,sms_disabled:int,results:list<array>}
+     * @return array{ok:bool,date:string,examined:int,cancelled:int,already_cancelled:int,not_cancellable:int,not_found:int,sms_sent:int,sms_duplicate:int,sms_failed:int,sms_disabled:int,results:list<array>}
      */
     public function cancelAppointmentsForDay(
         string $date,
@@ -842,7 +869,8 @@ final class AppointmentService
                 'already_cancelled' => 0,
                 'not_cancellable' => 0,
                 'not_found' => 0,
-                'sms_queued' => 0,
+                'sms_sent' => 0,
+                'sms_duplicate' => 0,
                 'sms_failed' => 0,
                 'sms_disabled' => 0,
                 'results' => [],
@@ -881,56 +909,86 @@ final class AppointmentService
     }
 
     /**
-     * @return array{queued:bool,status:string,queue_id?:int}
+     * Direct SMS.ir cancellation. Call only after the appointment transaction is committed.
+     * Does not enqueue. A provider failure must not roll back the cancellation.
+     *
+     * @return array{ok:bool,sent:bool,duplicate:bool,message:string,message_id:?string,sms_api_ms:int,total_ms:int}
      */
-    private function enqueueCancellationSms(
-        int $appointmentId,
-        string $reason,
-        int $historyId,
-        string $startsAtFallback
-    ): array {
+    public function sendAppointmentCancellationNow(int $appointmentId): array
+    {
+        $started = hrtime(true);
+        $fail = static function (string $message, int $startedAt, int $apiMs = 0) use ($appointmentId): array {
+            return [
+                'ok' => false,
+                'sent' => false,
+                'duplicate' => false,
+                'message' => $message,
+                'message_id' => null,
+                'sms_api_ms' => $apiMs,
+                'total_ms' => (int) round((hrtime(true) - $startedAt) / 1_000_000),
+            ];
+        };
+
+        if ($this->db->inTransaction()) {
+            return $fail('تراکنش دیتابیس هنوز باز است.', $started);
+        }
+
+        $templateId = SmsService::smsIrTemplateIdForMessageType('appointment_cancellation');
+        $idempotencyKey = 'appointment_cancellation:' . $appointmentId;
+        $legacyKey = 'appointment_cancel:' . $appointmentId;
+
+        if ($templateId <= 0) {
+            SmsTemplateRenderer::logEvent('smsir_cancellation_template_missing', [
+                'appointment_id' => $appointmentId,
+                'message_type' => 'appointment_cancellation',
+            ]);
+            return $fail('شناسه قالب لغو نوبت تنظیم نشده است.', $started);
+        }
+
         try {
-            $templateId = SmsService::smsIrTemplateIdForMessageType('appointment_cancellation');
-            if ($templateId <= 0) {
-                SmsTemplateRenderer::logEvent('smsir_cancellation_template_missing', [
+            if ($this->cancellationAlreadyAccepted($appointmentId, $idempotencyKey, $legacyKey)) {
+                SmsTemplateRenderer::logEvent('APPOINTMENT_CANCELLATION_SKIPPED_DUPLICATE', [
                     'appointment_id' => $appointmentId,
-                    'message_type' => 'appointment_cancellation',
+                    'template_id' => $templateId,
+                    'idempotency_key' => $idempotencyKey,
                 ]);
-                $this->logCancel('cancellation_sms_enqueue_failed', [
-                    'appointment_id' => $appointmentId,
-                    'reason' => 'missing_smsir_template_id',
-                ]);
-                return ['queued' => false, 'status' => 'no_template'];
+                $total = (int) round((hrtime(true) - $started) / 1_000_000);
+                return [
+                    'ok' => true,
+                    'sent' => false,
+                    'duplicate' => true,
+                    'message' => 'پیامک لغو قبلاً ارسال شده است.',
+                    'message_id' => null,
+                    'sms_api_ms' => 0,
+                    'total_ms' => $total,
+                ];
             }
 
+            $this->cancelPendingCancellationQueue($appointmentId, $idempotencyKey, $legacyKey);
+
             $row = $this->db->prepare(
-                "SELECT a.id, a.starts_at, a.patient_id,
-                        p.mobile, p.first_name, p.last_name, p.file_number, p.public_code,
-                        CONCAT(d.first_name,' ',d.last_name) doctor_name, s.name service_name
+                "SELECT a.id, a.starts_at, a.patient_id, p.mobile, p.first_name, p.last_name
                  FROM appointments a
                  JOIN patients p ON p.id=a.patient_id
-                 JOIN doctors d ON d.id=a.doctor_id
-                 JOIN services s ON s.id=a.service_id
-                 WHERE a.id=?"
+                 WHERE a.id=? AND a.deleted_at IS NULL"
             );
             $row->execute([$appointmentId]);
             $data = $row->fetch(PDO::FETCH_ASSOC);
             if (!$data) {
-                $this->logCancel('cancellation_sms_enqueue_failed', [
-                    'appointment_id' => $appointmentId,
-                    'reason' => 'appointment_not_found',
-                ]);
-                return ['queued' => false, 'status' => 'not_found'];
+                return $fail('نوبت برای ارسال پیامک یافت نشد.', $started);
             }
 
-            if (empty($data['starts_at']) && $startsAtFallback !== '') {
-                $data['starts_at'] = $startsAtFallback;
+            $mobile = normalize_mobile((string) ($data['mobile'] ?? ''));
+            if ($mobile === null) {
+                return $fail('شماره موبایل بیمار معتبر نیست.', $started);
             }
 
-            // Reason is stored in DB/history only — SMS.ir template 296200 has no CANCELLATION_REASON.
-            unset($reason);
-
-            $params = SmsTemplateRenderer::buildSmsIrAppointmentParameters($data, $data);
+            $built = SmsTemplateRenderer::buildSmsIrAppointmentParameters($data, $data);
+            $params = [
+                'FULL_NAME' => (string) ($built['FULL_NAME'] ?? ''),
+                'APPOINTMENT_DATE' => (string) ($built['APPOINTMENT_DATE'] ?? ''),
+                'APPOINTMENT_TIME' => (string) ($built['APPOINTMENT_TIME'] ?? ''),
+            ];
             $missing = SmsTemplateRenderer::missingSmsIrParameters($params);
             if ($missing !== []) {
                 SmsTemplateRenderer::logSmsIrParameterError([
@@ -939,73 +997,165 @@ final class AppointmentService
                     'missing_parameter_names' => $missing,
                     'message_type' => 'appointment_cancellation',
                 ]);
-                $this->logCancel('cancellation_sms_enqueue_failed', [
-                    'appointment_id' => $appointmentId,
-                    'reason' => 'parameter_error',
-                    'missing' => $missing,
-                ]);
-                return ['queued' => false, 'status' => 'parameter_error'];
+                return $fail('پارامترهای پیامک لغو ناقص است.', $started);
             }
 
-            // Stable per-appointment key — never send two cancellation templates for one appointment.
-            $idem = 'appointment_cancellation:' . $appointmentId;
+            $claimId = $this->claimCancellationSend($appointmentId, (int) $data['patient_id'], $mobile, $templateId, $idempotencyKey, $params);
+            if ($claimId === 0) {
+                $total = (int) round((hrtime(true) - $started) / 1_000_000);
+                return [
+                    'ok' => true,
+                    'sent' => false,
+                    'duplicate' => true,
+                    'message' => 'پیامک لغو قبلاً ارسال شده است.',
+                    'message_id' => null,
+                    'sms_api_ms' => 0,
+                    'total_ms' => $total,
+                ];
+            }
 
-            $qid = (new SmsService($this->db))->enqueueSmsIrTemplate([
-                'patient_id' => (int) $data['patient_id'],
+            $requestStarted = date('c');
+            $provider = SmsManager::make();
+            $parameterList = SmsTemplateRenderer::toSmsIrParameterList($params);
+            if ($provider instanceof SmsIrProvider || $provider instanceof LogSmsProvider) {
+                $send = $provider->sendTemplateNow($mobile, $templateId, $parameterList);
+            } else {
+                $send = $provider->sendTemplate($mobile, $templateId, $parameterList);
+            }
+            $responseAt = date('c');
+            $apiMs = (int) ($send['duration_ms'] ?? 0);
+            $ok = !empty($send['ok']);
+            $messageId = isset($send['message_id']) ? (string) $send['message_id'] : null;
+            $summary = sprintf(
+                'لغو نوبت (SMS.ir #%d): %s — %s %s',
+                $templateId,
+                $params['FULL_NAME'],
+                $params['APPOINTMENT_DATE'],
+                $params['APPOINTMENT_TIME']
+            );
+
+            $this->finishCancellationLog($claimId, $ok, $messageId, $summary, $send, $ok ? $idempotencyKey : null);
+            $total = (int) round((hrtime(true) - $started) / 1_000_000);
+            SmsTemplateRenderer::logEvent('APPOINTMENT_CANCELLATION_SMS', [
                 'appointment_id' => $appointmentId,
-                'mobile' => (string) $data['mobile'],
-                'message_type' => 'appointment_cancellation',
-                'source' => 'automation',
-                'provider_template_id' => $templateId,
-                'template_parameters' => $params,
-                'idempotency_key' => $idem,
-                'appointment_starts_at' => $data['starts_at'],
-                'log_message' => sprintf(
-                    'لغو نوبت (SMS.ir #%d): %s — %s %s',
-                    $templateId,
-                    $params['FULL_NAME'],
-                    $params['APPOINTMENT_DATE'],
-                    $params['APPOINTMENT_TIME']
-                ),
+                'template_id' => $templateId,
+                'sms_request_started_at' => $requestStarted,
+                'sms_provider_response_at' => $responseAt,
+                'sms_api_ms' => $apiMs,
+                'total_ms' => $total,
+                'provider_status' => $ok ? 'success' : 'failed',
+                'message_id' => $messageId,
+                'http' => $send['http'] ?? null,
             ]);
 
-            if ($qid > 0) {
-                $this->logCancel('cancellation_sms_queued', [
-                    'appointment_id' => $appointmentId,
-                    'queue_id' => $qid,
-                    'provider_template_id' => $templateId,
-                    'history_id' => $historyId,
-                    'idempotency_key' => $idem,
-                ]);
-                return ['queued' => true, 'status' => 'queued', 'queue_id' => $qid];
-            }
-
-            // Also treat legacy appointment_cancel:{id} as already queued
-            try {
-                $legacy = $this->db->prepare(
-                    "SELECT id FROM sms_queue WHERE idempotency_key=? AND status IN ('pending','processing','retrying','sent') LIMIT 1"
-                );
-                $legacy->execute(['appointment_cancel:' . $appointmentId]);
-                if ($legacy->fetchColumn()) {
-                    return ['queued' => false, 'status' => 'already_queued'];
-                }
-            } catch (\Throwable) {
-            }
-
-            $this->logCancel('cancellation_sms_enqueue_failed', [
-                'appointment_id' => $appointmentId,
-                'reason' => 'enqueue_zero',
-                'provider_template_id' => $templateId,
-            ]);
-            return ['queued' => false, 'status' => 'not_queued'];
+            return [
+                'ok' => true,
+                'sent' => $ok,
+                'duplicate' => false,
+                'message' => $ok ? 'پیامک لغو ارسال شد.' : 'نوبت لغو شد، اما ارسال پیامک لغو با خطا مواجه شد.',
+                'message_id' => $ok ? $messageId : null,
+                'sms_api_ms' => $apiMs,
+                'total_ms' => $total,
+            ];
         } catch (\Throwable $e) {
-            $this->logCancel('cancellation_sms_enqueue_failed', [
+            SmsTemplateRenderer::logEvent('APPOINTMENT_CANCELLATION_SMS_ERROR', [
                 'appointment_id' => $appointmentId,
-                'reason' => 'exception',
                 'error' => mb_substr($e->getMessage(), 0, 200),
             ]);
-            return ['queued' => false, 'status' => 'exception'];
+            return $fail('نوبت لغو شد، اما ارسال پیامک لغو با خطا مواجه شد.', $started);
         }
+    }
+
+    private function cancellationAlreadyAccepted(int $appointmentId, string $key, string $legacyKey): bool
+    {
+        $log = $this->db->prepare(
+            "SELECT id FROM sms_logs
+             WHERE (idempotency_key IN (?, ?) OR (appointment_id=? AND message_type='appointment_cancellation'))
+               AND status='sent'
+             LIMIT 1"
+        );
+        $log->execute([$key, $legacyKey, $appointmentId]);
+        if ($log->fetchColumn()) {
+            return true;
+        }
+        try {
+            $q = $this->db->prepare(
+                "SELECT id FROM sms_queue
+                 WHERE idempotency_key IN (?, ?) AND message_type='appointment_cancellation' AND status='sent'
+                 LIMIT 1"
+            );
+            $q->execute([$key, $legacyKey]);
+            return (bool) $q->fetchColumn();
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    private function cancelPendingCancellationQueue(int $appointmentId, string $key, string $legacyKey): void
+    {
+        try {
+            $this->db->prepare(
+                "UPDATE sms_queue SET status='cancelled', last_error='لغو مستقیم جایگزین صف شد'
+                 WHERE message_type='appointment_cancellation'
+                   AND status IN ('pending','processing','retrying')
+                   AND (appointment_id=? OR idempotency_key IN (?, ?))"
+            )->execute([$appointmentId, $key, $legacyKey]);
+        } catch (\Throwable) {
+        }
+    }
+
+    /** @param array<string, string> $params */
+    private function claimCancellationSend(
+        int $appointmentId,
+        int $patientId,
+        string $mobile,
+        int $templateId,
+        string $idempotencyKey,
+        array $params
+    ): int {
+        $body = sprintf('لغو نوبت #%d — %s %s', $templateId, $params['APPOINTMENT_DATE'], $params['APPOINTMENT_TIME']);
+        try {
+            $this->db->prepare(
+                "INSERT INTO sms_logs
+                 (patient_id, appointment_id, mobile, message_type, source, message_body, provider, status, attempts, idempotency_key)
+                 VALUES (?, ?, ?, 'appointment_cancellation', 'system', ?, 'smsir', 'sending', 1, ?)"
+            )->execute([$patientId, $appointmentId, $mobile, $body, $idempotencyKey]);
+            return (int) $this->db->lastInsertId();
+        } catch (PDOException $e) {
+            if ($e->getCode() !== '23000' && !str_contains($e->getMessage(), 'Duplicate')) {
+                throw $e;
+            }
+        }
+        return 0;
+    }
+
+    /** @param array<string, mixed> $send */
+    private function finishCancellationLog(int $logId, bool $ok, ?string $messageId, string $summary, array $send, ?string $idempotencyKey): void
+    {
+        unset($send['api_key'], $send['headers'], $send['request'], $send['raw']);
+        $this->db->prepare(
+            "UPDATE sms_logs
+             SET message_body=?, provider=?, provider_message_id=?, status=?, last_error=?, provider_response=?, idempotency_key=?, sent_at=?
+             WHERE id=?"
+        )->execute([
+            $summary,
+            (string) ($send['provider'] ?? SmsManager::driver()),
+            $ok ? $messageId : null,
+            $ok ? 'sent' : 'failed',
+            $ok ? null : mb_substr((string) ($send['error'] ?? 'ارسال ناموفق'), 0, 500),
+            json_encode([
+                'provider' => $send['provider'] ?? null,
+                'provider_status' => $send['provider_status'] ?? ($send['status_code'] ?? null),
+                'http' => $send['http'] ?? null,
+                'message_id' => $messageId,
+                'duration_ms' => $send['duration_ms'] ?? null,
+                'template_id' => $send['provider_template_id'] ?? null,
+                'ok' => $ok,
+            ], JSON_UNESCAPED_UNICODE),
+            $ok ? $idempotencyKey : null,
+            $ok ? date('Y-m-d H:i:s') : null,
+            $logId,
+        ]);
     }
 
     private function normalizeReason(?string $reason): string

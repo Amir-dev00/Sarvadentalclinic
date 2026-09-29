@@ -777,13 +777,17 @@ $router->post('/admin/appointments/status', static function (): void {
             $id,
             (int) Auth::adminId(),
             null,
-            false // status dropdown: change only, no auto SMS (use لغو نوبت for SMS)
+            true
         );
+        audit('appointment.cancel', 'appointments', $id, [
+            'via' => 'status_dropdown',
+            'sms_sent' => $result['sms_sent'] ?? false,
+            'sms_status' => $result['sms_status'] ?? null,
+        ]);
         if (!($result['ok'] ?? false) && ($result['status'] ?? '') !== 'already_cancelled') {
             flash('error', $result['message'] ?? 'لغو نوبت ناموفق بود.');
         } else {
-            audit('appointment.cancel', 'appointments', $id, ['via' => 'status_dropdown', 'sms' => false]);
-            flash('success', $result['message'] ?? 'وضعیت نوبت به‌روز شد.');
+            flash('success', appointment_cancel_result_message($result, true));
         }
         redirect('/admin/appointments');
     }
@@ -824,7 +828,8 @@ $router->post('/admin/appointments/cancel', static function (): void {
     audit('appointment.cancel', 'appointments', $id, [
         'status' => $result['status'] ?? null,
         'send_sms' => $sendSms,
-        'sms_queued' => $result['sms_queued'] ?? false,
+        'sms_sent' => $result['sms_sent'] ?? false,
+        'sms_status' => $result['sms_status'] ?? null,
     ]);
 
     if (!($result['ok'] ?? false) && ($result['status'] ?? '') !== 'already_cancelled') {
@@ -832,17 +837,7 @@ $router->post('/admin/appointments/cancel', static function (): void {
         redirect($redirectTo);
     }
 
-    $msg = 'نوبت با موفقیت لغو شد.';
-    if (($result['status'] ?? '') === 'already_cancelled') {
-        $msg = 'این نوبت قبلاً لغو شده بود.';
-    } elseif (!$sendSms) {
-        $msg = 'نوبت لغو شد؛ پیامک ارسال نشد.';
-    } elseif (!empty($result['sms_queued'])) {
-        $msg = 'نوبت با موفقیت لغو شد. پیام لغو برای بیمار در صف ارسال قرار گرفت.';
-    } else {
-        $msg = 'نوبت لغو شد، اما ثبت پیامک با خطا مواجه شد.';
-    }
-    flash(($result['ok'] ?? false) || ($result['status'] ?? '') === 'already_cancelled' ? 'success' : 'error', $msg);
+    flash('success', appointment_cancel_result_message($result, $sendSms));
     redirect($redirectTo);
 });
 
@@ -877,7 +872,9 @@ $router->post('/admin/appointments/cancel-bulk', static function (): void {
     audit('appointment.cancel_bulk', 'appointments', null, [
         'examined' => $summary['examined'],
         'cancelled' => $summary['cancelled'],
-        'sms_queued' => $summary['sms_queued'],
+        'sms_sent' => $summary['sms_sent'],
+        'sms_failed' => $summary['sms_failed'],
+        'sms_duplicate' => $summary['sms_duplicate'],
         'send_sms' => $sendSms,
     ]);
 
@@ -909,7 +906,9 @@ $router->post('/admin/appointments/cancel-day', static function (): void {
         'date' => $date,
         'examined' => $summary['examined'] ?? 0,
         'cancelled' => $summary['cancelled'] ?? 0,
-        'sms_queued' => $summary['sms_queued'] ?? 0,
+        'sms_sent' => $summary['sms_sent'] ?? 0,
+        'sms_failed' => $summary['sms_failed'] ?? 0,
+        'sms_duplicate' => $summary['sms_duplicate'] ?? 0,
         'send_sms' => $sendSms,
     ]);
 
