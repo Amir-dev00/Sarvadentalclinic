@@ -705,12 +705,12 @@ $router->post('/admin/appointments/create', static function (): void {
     $returnPatientId = (int) ($_POST['return_patient_id'] ?? 0);
     $returnTo = (string) ($_POST['return_to'] ?? '');
 
+    // patient_id is who is being booked. It must not become the list filter.
+    // Only an explicit return_to or return_patient_id keeps a narrower screen.
     if ($returnTo !== '' && preg_match('#^/admin/patients/\d+(\?[\w=&%-]*)?$#', $returnTo)) {
         $redirectTo = $returnTo;
     } elseif ($returnPatientId > 0) {
         $redirectTo = '/admin/appointments?patient_id=' . $returnPatientId;
-    } elseif ($patientId > 0) {
-        $redirectTo = '/admin/appointments?patient_id=' . $patientId;
     } else {
         $redirectTo = '/admin/appointments';
     }
