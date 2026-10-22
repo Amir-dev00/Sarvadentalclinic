@@ -169,18 +169,11 @@ final class PatientCrmService
         return $row ?: null;
     }
 
-    /** Suggest next numeric file_number based on existing پرونده numbers. */
+    /** Suggest next numeric file_number based on existing پرونده numbers (includes archived). */
     public function suggestNextFileNumber(): ?string
     {
         try {
-            $max = $this->db->query(
-                "SELECT MAX(CAST(file_number AS UNSIGNED)) FROM patients
-                 WHERE file_number REGEXP '^[0-9]+$' AND deleted_at IS NULL"
-            )->fetchColumn();
-            if ($max === false || $max === null || (int) $max <= 0) {
-                return '1';
-            }
-            return (string) ((int) $max + 1);
+            return (new PatientFileNumberService($this->db))->suggestNext();
         } catch (\Throwable) {
             return null;
         }
@@ -193,7 +186,11 @@ final class PatientCrmService
         $last = normalize_persian_text(trim((string) ($data['last_name'] ?? '')));
         $mobileRaw = trim((string) ($data['mobile'] ?? ''));
         $mobile = $mobileRaw !== '' ? normalize_mobile($mobileRaw) : null;
-        $file = trim((string) ($data['file_number'] ?? '')) ?: null;
+        $fileRaw = trim((string) ($data['file_number'] ?? ''));
+        $file = $fileRaw !== '' ? normalize_digits($fileRaw) : null;
+        if ($file !== null && $file === '') {
+            $file = null;
+        }
         $nid = trim((string) ($data['national_id'] ?? '')) ?: null;
         if ($mobileRaw !== '' && $mobile === null) {
             return ['ok' => false, 'message' => 'شماره موبایل معتبر نیست.'];
@@ -204,7 +201,8 @@ final class PatientCrmService
 
         // Mobile may be shared (family). Uniqueness is by file_number / national_id only.
         if ($file) {
-            $dup = $this->db->prepare('SELECT id FROM patients WHERE file_number=? AND deleted_at IS NULL AND id<>? LIMIT 1');
+            // Unique key covers soft-deleted rows too — do not reuse archived numbers.
+            $dup = $this->db->prepare('SELECT id FROM patients WHERE file_number=? AND id<>? LIMIT 1');
             $dup->execute([$file, $id ?? 0]);
             if ($dup->fetchColumn()) {
                 return ['ok' => false, 'message' => 'شماره پرونده تکراری است.'];
@@ -267,18 +265,39 @@ final class PatientCrmService
             return ['ok' => true, 'id' => $id];
         }
 
-        $code = 'P' . strtoupper(bin2hex(random_bytes(4)));
-        $this->db->prepare(
-            'INSERT INTO patients (public_code, file_number, first_name, last_name, father_name, mobile, landline, secondary_mobile, national_id, birth_date, birth_year_jalali, gender, email, address,
-              emergency_contact_name, emergency_contact_mobile, notes, referrer, preferred_doctor_id, is_imported, profile_completed, is_active)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1,1)'
-        )->execute([
-            $code, $file, $first, $last, $fields['father_name'], $mobile, $fields['landline'], $fields['secondary_mobile'], $nid,
-            $fields['birth_date'], $fields['birth_year_jalali'], $fields['gender'], $fields['email'],
-            $fields['address'], $fields['emergency_contact_name'], $fields['emergency_contact_mobile'], $fields['notes'],
-            $fields['referrer'], $fields['preferred_doctor_id'],
-        ]);
-        $newId = (int) $this->db->lastInsertId();
+        $insert = function (string $fileNumber) use ($fields, $first, $last, $mobile, $nid): int {
+            $code = 'P' . strtoupper(bin2hex(random_bytes(4)));
+            $this->db->prepare(
+                'INSERT INTO patients (public_code, file_number, first_name, last_name, father_name, mobile, landline, secondary_mobile, national_id, birth_date, birth_year_jalali, gender, email, address,
+                  emergency_contact_name, emergency_contact_mobile, notes, referrer, preferred_doctor_id, is_imported, profile_completed, is_active)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1,1)'
+            )->execute([
+                $code, $fileNumber, $first, $last, $fields['father_name'], $mobile, $fields['landline'], $fields['secondary_mobile'], $nid,
+                $fields['birth_date'], $fields['birth_year_jalali'], $fields['gender'], $fields['email'],
+                $fields['address'], $fields['emergency_contact_name'], $fields['emergency_contact_mobile'], $fields['notes'],
+                $fields['referrer'], $fields['preferred_doctor_id'],
+            ]);
+            return (int) $this->db->lastInsertId();
+        };
+
+        try {
+            if ($file === null) {
+                $allocator = new PatientFileNumberService($this->db);
+                $newId = $allocator->createWithAllocatedNumber($insert);
+                $lookup = $this->db->prepare('SELECT file_number FROM patients WHERE id=?');
+                $lookup->execute([$newId]);
+                $file = $lookup->fetchColumn() ?: null;
+            } else {
+                $newId = $insert($file);
+            }
+        } catch (\PDOException $e) {
+            if (((string) $e->getCode() === '23000') || str_contains($e->getMessage(), 'Duplicate')) {
+                if (str_contains($e->getMessage(), 'file_number') || str_contains($e->getMessage(), 'uq_patients_file_number')) {
+                    return ['ok' => false, 'message' => 'شماره پرونده تکراری است.'];
+                }
+            }
+            throw $e;
+        }
         audit('patient.created', 'patients', $newId, ['mobile' => $mobile, 'file_number' => $file]);
         return ['ok' => true, 'id' => $newId];
     }

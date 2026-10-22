@@ -29,7 +29,12 @@ $completed = !empty($patient['profile_completed']);
                 سلام<?= $name !== '' ? '، ' . e($name) : '' ?>
             </h1>
             <p style="margin:0;color:#6b7280;">
-                کد بیمار: <code><?= e($patient['public_code'] ?? '') ?></code>
+                شماره پرونده:
+                <?php if (!empty($patient['file_number'])): ?>
+                    <code dir="ltr"><?= e((string) $patient['file_number']) ?></code>
+                <?php else: ?>
+                    <span>ثبت نشده</span>
+                <?php endif; ?>
                 &nbsp;|&nbsp;
                 موبایل: <span dir="ltr"><?= e($patient['mobile'] ?? '') ?></span>
             </p>

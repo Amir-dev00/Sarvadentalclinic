@@ -416,36 +416,28 @@ $router->post('/api/auth/register', static function (): void {
     if ($first === null || $last === null) {
         json_response(['ok' => false, 'message' => 'نام و نام خانوادگی الزامی است.'], 422);
     }
-    $find = db()->prepare('SELECT id FROM patients WHERE mobile = ? AND deleted_at IS NULL LIMIT 1');
-    $find->execute([$mobile]);
-    $existingId = (int) $find->fetchColumn();
-    if ($existingId > 0) {
-        unset($_SESSION['otp_verified_mobile'], $_SESSION['auth_redirect']);
-        Auth::loginPatient($existingId);
-        audit('patient.login', 'patient', $existingId);
-        json_response(['ok' => true, 'is_new' => false, 'redirect' => url('/patient')]);
-    }
-    $code = 'P' . strtoupper(bin2hex(random_bytes(4)));
     try {
-        $stmt = db()->prepare(
-            'INSERT INTO patients (public_code, first_name, last_name, mobile, profile_completed) VALUES (?,?,?,?,0)'
-        );
-        $stmt->execute([$code, $first, $last, $mobile]);
-        $id = (int) db()->lastInsertId();
-    } catch (\PDOException $e) {
-        $find->execute([$mobile]);
-        $existingId = (int) $find->fetchColumn();
-        if ($existingId < 1) {
-            json_response(['ok' => false, 'message' => 'ثبت‌نام انجام نشد. دوباره تلاش کنید.'], 422);
-        }
-        unset($_SESSION['otp_verified_mobile'], $_SESSION['auth_redirect']);
-        Auth::loginPatient($existingId);
-        audit('patient.login', 'patient', $existingId);
-        json_response(['ok' => true, 'is_new' => false, 'redirect' => url('/patient')]);
+        $created = (new \Sarva\Services\PatientFileNumberService(db()))
+            ->createRegisteredPatient($mobile, $first, $last);
+    } catch (\Throwable) {
+        json_response(['ok' => false, 'message' => 'ثبت‌نام انجام نشد. دوباره تلاش کنید.'], 422);
+    }
+    if (!($created['ok'] ?? false)) {
+        json_response(['ok' => false, 'message' => $created['message'] ?? 'ثبت‌نام انجام نشد.'], 422);
+    }
+    $id = (int) ($created['id'] ?? 0);
+    if ($id < 1) {
+        json_response(['ok' => false, 'message' => 'ثبت‌نام انجام نشد. دوباره تلاش کنید.'], 422);
     }
     unset($_SESSION['otp_verified_mobile'], $_SESSION['auth_redirect']);
     Auth::loginPatient($id);
-    audit('patient.register', 'patient', $id);
+    if (!empty($created['already_exists'])) {
+        audit('patient.login', 'patient', $id);
+        json_response(['ok' => true, 'is_new' => false, 'redirect' => url('/patient')]);
+    }
+    audit('patient.register', 'patient', $id, [
+        'file_number' => $created['file_number'] ?? null,
+    ]);
     json_response(['ok' => true, 'redirect' => url('/patient')]);
 });
 

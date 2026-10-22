@@ -64,13 +64,14 @@ assert_true('verify clears a stale appointment redirect', str_contains($verify, 
 assert_true('verify does not read auth_redirect as a destination', !str_contains($verify, "\$_SESSION['auth_redirect'] ??"));
 
 assert_true('register requires the verified mobile', str_contains($register, 'otp_verified_mobile'));
-assert_true('register checks the mobile again before insert', str_contains($register, 'SELECT id FROM patients WHERE mobile = ? AND deleted_at IS NULL'));
-assert_true('register creates an incomplete profile', str_contains($register, 'profile_completed) VALUES (?,?,?,?,0)'));
+assert_true('register allocates a file number via shared service', str_contains($register, 'PatientFileNumberService') && str_contains($register, 'createRegisteredPatient'));
+$fileSvcSrc = file_get_contents(dirname(__DIR__) . '/src/Services/PatientFileNumberService.php') ?: '';
+assert_true('allocator re-checks mobile before insert', str_contains($fileSvcSrc, 'SELECT id FROM patients WHERE mobile = ? AND deleted_at IS NULL'));
 assert_true('register uses loginPatient', str_contains($register, 'Auth::loginPatient'));
 assert_true('register audits patient.register', str_contains($register, "audit('patient.register'"));
 assert_true('register clears the otp mobile', str_contains($register, "unset(\$_SESSION['otp_verified_mobile'], \$_SESSION['auth_redirect'])"));
 assert_true('register always returns the panel', str_contains($register, "url('/patient')") && !str_contains($register, '/appointment'));
-assert_true('duplicate mobile logs in instead of inserting', substr_count($register, 'Auth::loginPatient') >= 2);
+assert_true('existing mobile path logs in without a second allocation', str_contains($register, 'already_exists'));
 
 assert_true('guest appointment does not store a post-auth destination', !str_contains($appointment, "auth_redirect'] = '/appointment'") && str_contains($appointment, "redirect('/auth')"));
 assert_true('auth page drops a stale redirect', str_contains($authGet, "unset(\$_SESSION['auth_redirect'])") && str_contains($authGet, "redirect('/patient')"));
