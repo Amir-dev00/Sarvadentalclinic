@@ -56,15 +56,19 @@ assert_true('closed Friday remains closed in seed', (bool) preg_match("/\\(6, 5,
 
 assert_true('registration uses PatientFileNumberService', str_contains($routes, 'PatientFileNumberService') && str_contains($routes, 'createRegisteredPatient'));
 assert_true('registration no longer inserts without file_number', !preg_match("/INSERT INTO patients \\(public_code, first_name, last_name, mobile, profile_completed\\)/", $routes));
-$maxFn = '';
-if (preg_match('/function highestNumericFileNumber\(.*?\n    \}/s', $fileSvc, $m) === 1) {
-    $maxFn = $m[0];
-}
 assert_true(
-    'allocator MAX includes soft-deleted rows',
-    $maxFn !== ''
-    && str_contains($maxFn, "WHERE file_number REGEXP '^[0-9]+$'")
-    && !str_contains($maxFn, 'deleted_at')
+    'active sequence baseline excludes soft-deleted rows',
+    str_contains($fileSvc, 'highestNumericFileNumberScoped(false)')
+    && str_contains($fileSvc, 'AND deleted_at IS NULL')
+);
+assert_true(
+    'soft-deleted holders of the candidate number are released',
+    str_contains($fileSvc, 'releaseSoftDeletedFileNumber')
+);
+assert_true(
+    'next available is last-active + 1 then first free',
+    str_contains($fileSvc, 'function nextAvailableFileNumber')
+    && str_contains($fileSvc, '$this->highestNumericFileNumber() + 1')
 );
 assert_true('allocator uses GET_LOCK', str_contains($fileSvc, 'GET_LOCK'));
 assert_true('allocator holds lock through insert', str_contains($fileSvc, 'withFileNumberLock'));
