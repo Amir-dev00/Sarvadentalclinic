@@ -22,6 +22,9 @@ $total = (int) ($total ?? 0);
             <?php if (\Sarva\Core\Auth::adminHasPermission('sms.send') || \Sarva\Core\Auth::adminHasPermission('sms.send.bulk')): ?>
             <button type="button" class="btn btn-sm btn-outline-success" id="patientsBulkSms" disabled>ارسال پیامک به انتخاب‌شده‌ها</button>
             <?php endif; ?>
+            <?php if (\Sarva\Core\Auth::adminHasPermission('sms.send') || \Sarva\Core\Auth::adminHasPermission('sms.send.bulk') || \Sarva\Core\Auth::adminHasPermission('patients.manage')): ?>
+            <button type="button" class="btn btn-sm btn-outline-warning" id="patientsBulkDebtSms" disabled>ارسال پیامک بدهی</button>
+            <?php endif; ?>
             <?php if (\Sarva\Core\Auth::adminHasPermission('patients.import') || \Sarva\Core\Auth::adminHasPermission('patients.manage')): ?>
             <a href="<?= url('/admin/imports') ?>" class="btn btn-outline-secondary btn-sm">ورود Excel</a>
             <?php endif; ?>
@@ -91,6 +94,7 @@ $total = (int) ($total ?? 0);
                     <th>نام و نام خانوادگی</th>
                     <th>موبایل</th>
                     <th>کد ملی</th>
+                    <th>بدهی</th>
                     <th>آخرین مراجعه</th>
                     <th>نوبت بعدی</th>
                     <th>جلسات</th>
@@ -101,15 +105,19 @@ $total = (int) ($total ?? 0);
             </thead>
             <tbody>
                 <?php if (empty($items)): ?>
-                    <tr><td colspan="11" class="text-center py-4" style="color:#6b7280;">بیماری با این فیلتر یافت نشد.</td></tr>
+                    <tr><td colspan="12" class="text-center py-4" style="color:#6b7280;">بیماری با این فیلتر یافت نشد.</td></tr>
                 <?php else: foreach ($items as $item): ?>
-                    <?php $name = trim(($item['first_name'] ?? '') . ' ' . ($item['last_name'] ?? '')); ?>
+                    <?php
+                    $name = trim(($item['first_name'] ?? '') . ' ' . ($item['last_name'] ?? ''));
+                    $rowDebt = (float) ($item['debt_amount'] ?? 0);
+                    ?>
                     <tr>
                         <td><input type="checkbox" class="patient-row-check" value="<?= (int) $item['id'] ?>"></td>
                         <td><code><?= e($item['file_number'] ?: ($item['public_code'] ?? '')) ?></code></td>
                         <td><a href="<?= url('/admin/patients/' . (int) $item['id']) ?>"><?= e($name !== '' ? $name : '—') ?></a></td>
                         <td dir="ltr"><?= e($item['mobile'] ?? '—') ?></td>
                         <td><?= e($item['national_id'] ?? '—') ?></td>
+                        <td><?= $rowDebt > 0 ? e(to_persian_digits((string) (int) $rowDebt)) : '—' ?></td>
                         <td><?= e(to_jalali($item['last_visit_at'] ?? $item['last_appointment'] ?? null, 'Y/m/d')) ?></td>
                         <td><?= e(to_jalali($item['next_appointment'] ?? null, 'Y/m/d H:i')) ?></td>
                         <td><?= (int) ($item['visit_count'] ?? 0) ?></td>
@@ -171,14 +179,20 @@ $total = (int) ($total ?? 0);
 </div>
 <?php endif; ?>
 
+<form id="patientsBulkDebtForm" method="post" action="<?= url('/admin/patients/debt-sms-bulk') ?>" hidden>
+    <?= csrf_field() ?>
+    <div id="patientsBulkDebtIds"></div>
+</form>
 <script>
 (function () {
   var all = document.getElementById('patientsSelectAll');
   var btn = document.getElementById('patientsBulkSms');
+  var debtBtn = document.getElementById('patientsBulkDebtSms');
   var checks = function () { return Array.prototype.slice.call(document.querySelectorAll('.patient-row-check')); };
   function sync() {
     var ids = checks().filter(function (c) { return c.checked; }).map(function (c) { return c.value; });
     if (btn) btn.disabled = ids.length === 0;
+    if (debtBtn) debtBtn.disabled = ids.length === 0;
   }
   if (all) all.addEventListener('change', function () {
     checks().forEach(function (c) { c.checked = all.checked; });
@@ -193,6 +207,23 @@ $total = (int) ($total ?? 0);
     var url = <?= json_encode(url('/admin/sms/send'), JSON_UNESCAPED_UNICODE) ?> + '?preset=selected';
     ids.forEach(function (id) { url += '&patient_ids[]=' + encodeURIComponent(id); });
     window.location.href = url;
+  });
+  if (debtBtn) debtBtn.addEventListener('click', function () {
+    var ids = checks().filter(function (c) { return c.checked; }).map(function (c) { return c.value; });
+    if (!ids.length) return;
+    if (!confirm('پیامک بدهی فقط برای بیماران دارای بدهی و شماره معتبر ارسال می‌شود. ادامه؟')) return;
+    var form = document.getElementById('patientsBulkDebtForm');
+    var box = document.getElementById('patientsBulkDebtIds');
+    if (!form || !box) return;
+    box.innerHTML = '';
+    ids.forEach(function (id) {
+      var input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = 'patient_ids[]';
+      input.value = id;
+      box.appendChild(input);
+    });
+    form.submit();
   });
 
   var panel = document.getElementById('purgeAllPanel');

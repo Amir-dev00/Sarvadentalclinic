@@ -575,6 +575,10 @@ final class SmsService
                 config('sms.appointment_reminder_template_id', 0)
                 ?: ($_ENV['SMSIR_APPOINTMENT_REMINDER_TEMPLATE_ID'] ?? getenv('SMSIR_APPOINTMENT_REMINDER_TEMPLATE_ID') ?: 0)
             ),
+            'debt_reminder' => (int) (
+                config('sms.debt_reminder_template_id', 0)
+                ?: ($_ENV['SMSIR_DEBT_REMINDER_TEMPLATE_ID'] ?? getenv('SMSIR_DEBT_REMINDER_TEMPLATE_ID') ?: 0)
+            ),
             default => 0,
         };
     }

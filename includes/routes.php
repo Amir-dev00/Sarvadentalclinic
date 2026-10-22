@@ -450,6 +450,7 @@ $router->post('/auth/logout', static function (): void {
 // Patient panel
 $router->get('/patient', static function (): void {
     Auth::requirePatient();
+    (new \Sarva\Services\PatientDebtService(db()))->ensureSchema();
     $patient = db()->prepare('SELECT * FROM patients WHERE id = ?');
     $patient->execute([Auth::patientId()]);
     $patient = $patient->fetch();

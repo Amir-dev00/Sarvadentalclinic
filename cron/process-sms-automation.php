@@ -25,6 +25,7 @@ $log = $ctx['log'];
 $release = $ctx['release'];
 
 use Sarva\Core\Database;
+use Sarva\Services\PatientDebtService;
 use Sarva\Services\SmsAutomationService;
 use Sarva\Services\SmsService;
 
@@ -48,6 +49,13 @@ try {
         $log('process-sms-automation WARN automation enqueue failed: ' . $e->getMessage());
     }
 
+    $debtStats = ['checked' => 0, 'sent' => 0, 'skipped' => 0, 'failed' => 0];
+    try {
+        $debtStats = (new PatientDebtService($pdo))->processAutomaticReminders(40);
+    } catch (Throwable $e) {
+        $log('process-sms-automation WARN debt reminders failed: ' . $e->getMessage());
+    }
+
     $processed = $sms->processQueue(50);
 
     try {
@@ -62,13 +70,17 @@ try {
 
     $stats = $auto->lastCronStats();
     $log(sprintf(
-        'SMS_AUTOMATION_CRON checked_rules=%d daily_reminder_due=%d reminder_queued=%d queue_processed=%d sent=%d failed=%d',
+        'SMS_AUTOMATION_CRON checked_rules=%d daily_reminder_due=%d reminder_queued=%d queue_processed=%d sent=%d failed=%d debt_checked=%d debt_sent=%d debt_skipped=%d debt_failed=%d',
         (int) ($stats['checked_rules'] ?? 0),
         (int) ($stats['daily_reminder_due'] ?? 0),
         (int) ($stats['reminder_queued'] ?? $queuedAuto),
         (int) ($processed['processed'] ?? 0),
         (int) ($processed['sent'] ?? 0),
-        (int) ($processed['failed'] ?? 0)
+        (int) ($processed['failed'] ?? 0),
+        (int) ($debtStats['checked'] ?? 0),
+        (int) ($debtStats['sent'] ?? 0),
+        (int) ($debtStats['skipped'] ?? 0),
+        (int) ($debtStats['failed'] ?? 0)
     ));
 } catch (Throwable $e) {
     $log('process-sms-automation FATAL: ' . $e->getMessage());

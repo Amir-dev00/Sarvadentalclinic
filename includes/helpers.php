@@ -520,6 +520,15 @@ function normalize_digits(string $value): string
     ]);
 }
 
+/** Convert English (or mixed) digits to Persian digits for UI / SMS.ir templates. */
+function to_persian_digits(string|int|float $value): string
+{
+    return strtr((string) $value, [
+        '0' => '۰', '1' => '۱', '2' => '۲', '3' => '۳', '4' => '۴',
+        '5' => '۵', '6' => '۶', '7' => '۷', '8' => '۸', '9' => '۹',
+    ]);
+}
+
 /** Normalize Persian text (ي→ی، ك→ک, collapse spaces). */
 function normalize_persian_text(string $value): string
 {
@@ -644,6 +653,7 @@ function sms_type_labels(): array
         'appointment_cancellation' => 'لغو نوبت',
         'appointment_reschedule' => 'تغییر نوبت',
         'payment_confirmation' => 'تأیید پرداخت',
+        'debt_reminder' => 'یادآوری بدهی',
         'general' => 'عمومی',
         'birthday' => 'تبریک / کمپین',
         'custom' => 'سفارشی',

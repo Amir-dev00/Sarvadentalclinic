@@ -31,10 +31,24 @@ $templates = $templates ?? [];
             <label class="form-label">منطقه زمانی کلینیک</label>
             <input name="timezone" class="form-control" value="<?= e((string) setting('timezone', 'Asia/Tehran')) ?>">
         </div>
+        <div class="col-12"><hr style="margin:8px 0 4px;border-color:#e5e7eb;"></div>
+        <div class="col-md-4 d-flex align-items-end">
+            <label class="form-check">
+                <input type="checkbox" name="debt_sms_auto_enabled" class="form-check-input" <?= setting('debt_sms_auto_enabled', '0') === '1' ? 'checked' : '' ?>>
+                ارسال خودکار پیامک بدهی
+            </label>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">فاصله تکرار پیامک بدهی (روز)</label>
+            <input name="debt_sms_interval_days" type="number" min="1" max="365" class="form-control" value="<?= e((string) setting('debt_sms_interval_days', '7')) ?>">
+        </div>
+        <div class="col-md-5 d-flex align-items-end">
+            <p class="form-text mb-2" style="color:#9a3412;">به‌صورت پیش‌فرض غیرفعال است. تا وقتی فعال نکنید، هیچ پیامک بدهی خودکاری ارسال نمی‌شود.</p>
+        </div>
         <div class="col-12">
             <button class="btn btn-primary" style="background:#031D4F;border-color:#031D4F;">ذخیره</button>
         </div>
     </form>
     <p class="mt-3" style="color:#6b7280;font-size:.9rem;">برای SMS.ir در فایل <code>.env</code> این مقادیر را بگذارید:<br>
-        <code>SMS_DRIVER=smsir</code> · <code>SMSIR_API_KEY</code> · <code>SMSIR_OTP_TEMPLATE_ID</code> (OTP) · <code>SMSIR_APPOINTMENT_REMINDER_TEMPLATE_ID</code> (یادآوری نوبت) · <code>SMSIR_LINE_NUMBER</code> (ارسال متن آزاد)</p>
+        <code>SMS_DRIVER=smsir</code> · <code>SMSIR_API_KEY</code> · <code>SMSIR_OTP_TEMPLATE_ID</code> (OTP) · <code>SMSIR_APPOINTMENT_REMINDER_TEMPLATE_ID</code> (یادآوری نوبت) · <code>SMSIR_DEBT_REMINDER_TEMPLATE_ID</code> (یادآوری بدهی — الگوی <code>#DEBT_AMOUNT#</code>) · <code>SMSIR_LINE_NUMBER</code> (ارسال متن آزاد)</p>
 </div>

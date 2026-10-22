@@ -111,6 +111,13 @@ $canPlans = \Sarva\Core\Auth::adminHasPermission('patient_treatment_plans.view')
 </div>
 
 <?php if ($tab === 'summary'): ?>
+<?php
+$debtAmount = (float) ($debt_amount ?? $patient['debt_amount'] ?? 0);
+$canEditDebt = \Sarva\Core\Auth::adminHasPermission('patients.manage')
+    || \Sarva\Core\Auth::adminHasPermission('patients.edit');
+$canSendDebtSms = \Sarva\Core\Auth::adminHasPermission('sms.send')
+    || \Sarva\Core\Auth::adminHasPermission('patients.manage');
+?>
 <div class="stat-grid">
     <div class="stat-card"><h3><?= e($patient['file_number'] ?: '—') ?></h3><p>شماره پرونده</p></div>
     <div class="stat-card"><h3><?= $session_count ?></h3><p>جلسات ثبت‌شده</p></div>
@@ -133,6 +140,34 @@ $canPlans = \Sarva\Core\Auth::adminHasPermission('patient_treatment_plans.view')
             ?></div>
         </div>
     </div>
+</div>
+<div class="admin-card">
+    <h3 style="margin:0 0 12px;font-size:1rem;color:#031D4F;">مبلغ بدهی</h3>
+    <?php if ($canEditDebt): ?>
+    <form method="post" action="<?= url('/admin/patients/' . $id . '/debt') ?>" class="row g-2 align-items-end">
+        <?= csrf_field() ?>
+        <div class="col-md-4">
+            <label class="form-label">مبلغ بدهی</label>
+            <input type="text" name="debt_amount" class="form-control" dir="ltr"
+                   value="<?= e($debtAmount > 0 ? (string) (int) $debtAmount : '0') ?>"
+                   inputmode="numeric" autocomplete="off">
+            <div class="form-text">نمایش: <?= $debtAmount > 0 ? e(to_persian_digits((string) (int) $debtAmount)) : '۰' ?></div>
+        </div>
+        <div class="col-md-8 d-flex flex-wrap gap-2">
+            <button type="submit" class="btn btn-sm" style="background:#031D4F;color:#fff;border:0;">ذخیره مبلغ بدهی</button>
+            <?php if ($canSendDebtSms): ?>
+            <button type="submit" formaction="<?= url('/admin/patients/' . $id . '/debt-sms') ?>" class="btn btn-sm btn-outline-success"
+                    onclick="return confirm('پیامک یادآوری بدهی برای این بیمار ارسال شود؟');">ارسال پیامک بدهی</button>
+            <?php endif; ?>
+        </div>
+    </form>
+    <?php else: ?>
+    <p style="margin:0;font-size:1.15rem;"><?= $debtAmount > 0 ? e(to_persian_digits((string) (int) $debtAmount)) : '۰' ?></p>
+    <?php endif; ?>
+    <p style="margin:10px 0 0;color:#6b7280;font-size:.9rem;">
+        آخرین پیامک بدهی:
+        <?= !empty($last_debt_sms_at) ? e(to_jalali($last_debt_sms_at, 'Y/m/d - H:i')) : '—' ?>
+    </p>
 </div>
 <?php if ($visits): ?>
 <div class="admin-card">

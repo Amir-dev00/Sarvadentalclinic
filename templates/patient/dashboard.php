@@ -21,6 +21,7 @@ $payLabels = [
 ];
 $name = trim(($patient['first_name'] ?? '') . ' ' . ($patient['last_name'] ?? ''));
 $completed = !empty($patient['profile_completed']);
+$patientDebt = (float) ($patient['debt_amount'] ?? 0);
 ?>
 <div class="admin-card" style="margin-bottom:20px;">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
@@ -37,6 +38,14 @@ $completed = !empty($patient['profile_completed']);
                 <?php endif; ?>
                 &nbsp;|&nbsp;
                 موبایل: <span dir="ltr"><?= e($patient['mobile'] ?? '') ?></span>
+            </p>
+            <p style="margin:8px 0 0;color:#031D4F;">
+                مبلغ بدهی:
+                <?php if ($patientDebt > 0): ?>
+                    <strong><?= e(to_persian_digits((string) (int) $patientDebt)) ?></strong>
+                <?php else: ?>
+                    <strong style="color:#067a5f;">بدهی ندارید</strong>
+                <?php endif; ?>
             </p>
         </div>
         <div>

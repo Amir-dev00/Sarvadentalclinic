@@ -11,6 +11,8 @@ final class PatientCrmService
     public function __construct(private readonly PDO $db)
     {
         $this->ensureMobileNotUnique();
+        // Ensure debt columns exist before SELECT p.* / profile reads.
+        (new PatientDebtService($this->db))->ensureSchema();
     }
 
     /** Shared family mobiles are allowed; identity is file_number / national_id. */
@@ -452,6 +454,7 @@ final class PatientCrmService
         } catch (\Throwable) {
             $auditRows = $audit->fetchAll(PDO::FETCH_ASSOC);
         }
+        $debtSvc = new PatientDebtService($this->db);
         return [
             'patient' => $patient,
             'appointments' => $appts->fetchAll(PDO::FETCH_ASSOC),
@@ -468,6 +471,8 @@ final class PatientCrmService
             'treatment_plans' => $clinical->listPlans($id),
             'next_appointment' => $next->fetchColumn() ?: null,
             'last_appointment' => $last->fetchColumn() ?: null,
+            'last_debt_sms_at' => $debtSvc->lastDebtReminderAt($id),
+            'debt_amount' => (float) ($patient['debt_amount'] ?? 0),
         ];
     }
 

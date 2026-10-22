@@ -32,6 +32,12 @@ return [
         ?? getenv('SMSIR_APPOINTMENT_CANCELLATION_TEMPLATE_ID')
         ?: 0
     ),
+    // SMS.ir Verify template for patient debt reminders (#DEBT_AMOUNT#)
+    'debt_reminder_template_id' => (int) (
+        $_ENV['SMSIR_DEBT_REMINDER_TEMPLATE_ID']
+        ?? getenv('SMSIR_DEBT_REMINDER_TEMPLATE_ID')
+        ?: 0
+    ),
     'sender' => (string) ($_ENV['SMSIR_LINE_NUMBER'] ?? ($_ENV['SMS_SENDER'] ?? '')),
     'otp_template' => $_ENV['SMS_OTP_TEMPLATE'] ?? '',
 ];

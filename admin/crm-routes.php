@@ -9,6 +9,7 @@ declare(strict_types=1);
 use Sarva\Core\Auth;
 use Sarva\Core\Csrf;
 use Sarva\Services\PatientCrmService;
+use Sarva\Services\PatientDebtService;
 use Sarva\Services\SmsAudienceService;
 use Sarva\Services\SmsAutomationService;
 use Sarva\Services\SmsService;
@@ -19,6 +20,7 @@ use Sarva\Sms\SmsManager;
 
 $crm = static fn (): PatientCrmService => new PatientCrmService(db());
 $sms = static fn (): SmsService => new SmsService(db());
+$debt = static fn (): PatientDebtService => new PatientDebtService(db());
 
 $router->get('/admin/patients', static function () use ($crm): void {
     Auth::requireAdminAny(['patients.manage', 'patients.view']);
@@ -193,6 +195,49 @@ $router->post('/admin/patients/{id}/sms', static function (string $id) use ($crm
     audit('sms.manual', 'patients', (int) $id, ['queue_id' => $qid]);
     flash('success', $qid ? 'پیامک در صف ارسال قرار گرفت.' : 'ارسال انجام نشد (شماره نامعتبر یا تکراری).');
     redirect('/admin/patients/' . (int) $id . '?tab=sms');
+});
+
+$router->post('/admin/patients/{id}/debt', static function (string $id) use ($debt): void {
+    Auth::requireAdminAny(['patients.manage', 'patients.edit']);
+    Csrf::assertValid();
+    $result = $debt()->updateDebt((int) $id, $_POST['debt_amount'] ?? '', Auth::adminId());
+    flash($result['ok'] ? 'success' : 'error', $result['message']);
+    redirect('/admin/patients/' . (int) $id);
+});
+
+$router->post('/admin/patients/{id}/debt-sms', static function (string $id) use ($debt): void {
+    Auth::requireAdminAny(['sms.send', 'patients.manage']);
+    Csrf::assertValid();
+    $result = $debt()->sendReminder((int) $id, 'manual', Auth::adminId());
+    flash(!empty($result['sent']) ? 'success' : 'error', $result['message']);
+    redirect('/admin/patients/' . (int) $id);
+});
+
+$router->post('/admin/patients/debt-sms-bulk', static function () use ($debt): void {
+    Auth::requireAdminAny(['sms.send', 'sms.send.bulk', 'patients.manage']);
+    Csrf::assertValid();
+    $ids = $_POST['patient_ids'] ?? [];
+    if (!is_array($ids)) {
+        $ids = [];
+    }
+    $ids = array_values(array_filter(array_map('intval', $ids), static fn (int $v): bool => $v > 0));
+    if ($ids === []) {
+        flash('error', 'هیچ بیماری انتخاب نشده است.');
+        redirect('/admin/patients');
+    }
+    $summary = $debt()->sendBulkManual($ids, Auth::adminId());
+    flash(
+        'success',
+        sprintf(
+            'ارسال موفق: %d — ناموفق: %d — بدون بدهی: %d — شماره نامعتبر: %d',
+            (int) $summary['sent'],
+            (int) $summary['failed'],
+            (int) $summary['no_debt'],
+            (int) $summary['invalid_mobile']
+        )
+    );
+    audit('sms.debt_bulk', 'patients', null, $summary);
+    redirect('/admin/patients');
 });
 
 $router->get('/admin/sms-logs', static function (): void {
@@ -586,13 +631,21 @@ $router->get('/admin/sms/settings', static function (): void {
 $router->post('/admin/sms/settings', static function (): void {
     Auth::requireAdmin('sms.settings.manage');
     Csrf::assertValid();
-    $keys = ['sms_enabled', 'sms_max_retries', 'sms_retry_delay_minutes', 'sms_default_reminder_time', 'sms_bulk_limit', 'timezone'];
+    $keys = [
+        'sms_enabled', 'sms_max_retries', 'sms_retry_delay_minutes', 'sms_default_reminder_time',
+        'sms_bulk_limit', 'timezone', 'debt_sms_auto_enabled', 'debt_sms_interval_days',
+    ];
     $stmt = db()->prepare('INSERT INTO site_settings (`key`, `value`, group_name) VALUES (?,?,?) ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)');
     $stmt->execute(['sms_enabled', isset($_POST['sms_enabled']) ? '1' : '0', 'sms']);
+    $stmt->execute(['debt_sms_auto_enabled', isset($_POST['debt_sms_auto_enabled']) ? '1' : '0', 'sms']);
     foreach (['sms_max_retries', 'sms_retry_delay_minutes', 'sms_default_reminder_time', 'sms_bulk_limit'] as $k) {
         if (isset($_POST[$k])) {
             $stmt->execute([$k, trim((string) $_POST[$k]), 'sms']);
         }
+    }
+    if (isset($_POST['debt_sms_interval_days'])) {
+        $days = max(1, min(365, (int) $_POST['debt_sms_interval_days']));
+        $stmt->execute(['debt_sms_interval_days', (string) $days, 'sms']);
     }
     if (!empty($_POST['timezone'])) {
         $stmt->execute(['timezone', trim((string) $_POST['timezone']), 'general']);
