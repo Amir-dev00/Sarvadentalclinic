@@ -68,9 +68,37 @@ $router->get('/', static function (): void {
             $transformations = [];
         }
     }
+    $heroImage = (string) (($sections['hero']['image'] ?? null) ?: 'images/hero-bg-image.png');
+    $homeDescription = (string) setting(
+        'meta_description',
+        'کلینیک دندانپزشکی سروا (دکتر سید حسن زمان‌زاده) — خدمات تخصصی دندانپزشکی، ایمپلنت، ارتودنسی و زیبایی لبخند با تجهیزات مدرن.'
+    );
     view('pages/home', compact('sections', 'services', 'doctors', 'testimonials', 'faqs', 'latestArticles', 'transformations') + [
         'title' => setting('clinic_name', config('app.name')),
-        'htmlTitle' => 'Sarva Dental Clinic | صفحه اصلی',
+        'htmlTitle' => 'کلینیک دندانپزشکی سروا | صفحه اصلی',
+        'metaDescription' => $homeDescription,
+        'canonical' => url('/'),
+        'ogType' => 'website',
+        'ogDescription' => $homeDescription,
+        'preloadImage' => $heroImage,
+        'structuredData' => [
+            '@context' => 'https://schema.org',
+            '@type' => 'Dentist',
+            'name' => setting('clinic_name', 'کلینیک دندانپزشکی سروا'),
+            'url' => url('/'),
+            'logo' => media_url(setting('logo_path', 'images/logo.svg')),
+            'image' => media_url($heroImage),
+            'description' => $homeDescription,
+            'telephone' => setting('phone', ''),
+            'email' => setting('email', ''),
+            'address' => [
+                '@type' => 'PostalAddress',
+                'streetAddress' => setting('address', 'تهران، ایران'),
+                'addressCountry' => 'IR',
+                'addressLocality' => 'تهران',
+            ],
+            'openingHours' => setting('working_hours', 'شنبه تا پنجشنبه ۱۰:۰۰-۱۹:۳۰'),
+        ],
     ]);
 });
 

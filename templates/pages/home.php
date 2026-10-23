@@ -30,7 +30,9 @@ $about = $sections['about'] ?? [];
                 <div class="about-us-image-box wow fadeInUp">
                     <div class="about-us-image">
                         <figure class="image-anime">
-                            <img src="<?= media_url($about['image'] ?? 'images/about-us-image.jpg') ?>" alt="" width="640" height="720">
+                            <img src="<?= media_url($about['image'] ?? 'images/about-us-image.jpg') ?>"
+                                 alt="<?= e($about['title'] ?? 'درباره کلینیک دندانپزشکی سروا') ?>"
+                                 width="640" height="720" decoding="async" fetchpriority="low">
                         </figure>
                     </div>
                     <div class="about-us-blockquote-box">
@@ -103,11 +105,11 @@ $about = $sections['about'] ?? [];
                 <div class="team-item wow fadeInUp"<?= $delay ? ' data-wow-delay="' . e((string) $delay) . 's"' : '' ?>>
                     <div class="team-item-image">
                         <figure>
-                            <img src="<?= media_url($doctor['photo'] ?: 'images/team-image-1.jpg') ?>" alt="<?= e($fullName) ?>" loading="lazy" width="400" height="420">
+                            <img src="<?= media_url($doctor['photo'] ?: 'images/team-image-1.jpg') ?>" alt="<?= e($fullName) ?>" loading="lazy" decoding="async" width="400" height="420">
                         </figure>
                     </div>
                     <div class="team-item-content">
-                        <h2><?= e($fullName) ?></h2>
+                        <h3><?= e($fullName) ?></h3>
                         <p><?= e($doctor['specialty'] ?? '') ?></p>
                     </div>
                 </div>
@@ -148,8 +150,8 @@ $transformations = $transformations ?? [];
             <div class="col-lg-4 col-md-6">
                 <div class="transformation-image-box wow fadeInUp"<?= $delay ? ' data-wow-delay="' . e((string) $delay) . 's"' : '' ?>>
                     <div class="transformation_image twentytwenty-container">
-                        <img src="<?= media_url($before) ?>" alt="قبل — <?= e($title) ?>" loading="lazy">
-                        <img src="<?= media_url($after) ?>" alt="بعد — <?= e($title) ?>" loading="lazy">
+                        <img src="<?= media_url($before) ?>" alt="قبل — <?= e($title) ?>" loading="lazy" decoding="async" width="640" height="480">
+                        <img src="<?= media_url($after) ?>" alt="بعد — <?= e($title) ?>" loading="lazy" decoding="async" width="640" height="480">
                     </div>
                     <div class="transformation-image-title">
                         <h3><?= e($title) ?></h3>

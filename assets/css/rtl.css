@@ -68,7 +68,7 @@ h1, h2, h3, h4, h5, h6,
 .service-item,
 .team-content,
 .faq-accordion-header h3,
-.footer-links h2,
+.footer-links h2, .footer-links h3,
 .breadcrumb {
   letter-spacing: normal !important;
   word-spacing: normal !important;
@@ -671,6 +671,42 @@ input[inputmode="numeric"],
   text-align: right; font-size: .92rem;
 }
 .admin-table th { background: #f8fafc; color: var(--primary-color); }
+/* Skip link + focus for accessibility (Lighthouse) */
+.skip-link {
+  position: absolute;
+  top: -100px;
+  right: 16px;
+  z-index: 10000;
+  background: #031D4F;
+  color: #fff !important;
+  padding: 10px 16px;
+  border-radius: 10px;
+  text-decoration: none;
+  font-weight: 600;
+}
+.skip-link:focus {
+  top: 16px;
+  outline: 3px solid #05B18B;
+  outline-offset: 2px;
+}
+a:focus-visible,
+button:focus-visible,
+.btn-default:focus-visible,
+.nav-link:focus-visible {
+  outline: 3px solid #05B18B;
+  outline-offset: 2px;
+}
+/* Keep service/team title styles if markup uses h3 */
+.service-item-title h3,
+.team-item-content h3 {
+  margin: 0;
+}
+.footer-links h3,
+.footer-opening-hours h3,
+.footer-contact-info h3 {
+  color: inherit;
+}
+
 .admin-card {
   background: #fff; border-radius: 18px; padding: 20px;
   border: 1px solid #e8ecf4; margin-bottom: 20px;

@@ -21,10 +21,10 @@ $delay = $index > 0 ? '0.' . min($index * 2, 8) . 's' : null;
     <div class="service-item-header">
         <div class="service-item-title">
             <p><?= e(str_pad((string) $num, 2, '0', STR_PAD_LEFT)) ?></p>
-            <h2><a href="<?= url('/services/' . $service['slug']) ?>"><?= e($service['name']) ?></a></h2>
+            <h3><a href="<?= url('/services/' . $service['slug']) ?>"><?= e($service['name']) ?></a></h3>
         </div>
         <div class="icon-box">
-            <img src="<?= media_url($icon) ?>" alt="">
+            <img src="<?= media_url($icon) ?>" alt="" width="48" height="48" decoding="async" aria-hidden="true">
         </div>
     </div>
     <div class="service-item-content">
@@ -32,9 +32,9 @@ $delay = $index > 0 ? '0.' . min($index * 2, 8) . 's' : null;
     </div>
     <?php if ($image): ?>
     <div class="service-image">
-        <a href="<?= url('/services/' . $service['slug']) ?>" data-cursor-text="مشاهده">
+        <a href="<?= url('/services/' . $service['slug']) ?>" data-cursor-text="مشاهده" aria-label="مشاهده <?= e($service['name']) ?>">
             <figure class="image-anime">
-                <img src="<?= media_url($image) ?>" alt="<?= e($service['name']) ?>">
+                <img src="<?= media_url($image) ?>" alt="<?= e($service['name']) ?>" loading="lazy" decoding="async" width="640" height="420">
             </figure>
         </a>
     </div>

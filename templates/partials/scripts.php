@@ -1,4 +1,5 @@
-<script src="<?= asset('js/jquery-3.7.1.min.js') ?>"></script>
+<script>window.SARVA = { csrf: <?= json_encode(csrf_token(), JSON_UNESCAPED_UNICODE) ?>, url: <?= json_encode(url('/'), JSON_UNESCAPED_UNICODE) ?> };</script>
+<script src="<?= asset('js/jquery-3.7.1.min.js') ?>" defer></script>
 <script src="<?= asset('js/bootstrap.min.js') ?>" defer></script>
 <script src="<?= asset('js/jquery.slicknav.js') ?>" defer></script>
 <script src="<?= asset('js/jquery.magnific-popup.min.js') ?>" defer></script>
@@ -12,4 +13,3 @@
 <script src="<?= asset('js/wow.min.js') ?>" defer></script>
 <script src="<?= asset('js/function.js') ?>" defer></script>
 <script src="<?= asset('js/testimonial-marquee.js') ?>" defer></script>
-<script>window.SARVA = { csrf: <?= json_encode(csrf_token(), JSON_UNESCAPED_UNICODE) ?>, url: <?= json_encode(url('/'), JSON_UNESCAPED_UNICODE) ?> };</script>
