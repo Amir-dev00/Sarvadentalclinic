@@ -36,7 +36,7 @@ return [
     'debt_reminder_template_id' => (int) (
         $_ENV['SMSIR_DEBT_REMINDER_TEMPLATE_ID']
         ?? getenv('SMSIR_DEBT_REMINDER_TEMPLATE_ID')
-        ?: 0
+        ?: 260061
     ),
     'sender' => (string) ($_ENV['SMSIR_LINE_NUMBER'] ?? ($_ENV['SMS_SENDER'] ?? '')),
     'otp_template' => $_ENV['SMS_OTP_TEMPLATE'] ?? '',
