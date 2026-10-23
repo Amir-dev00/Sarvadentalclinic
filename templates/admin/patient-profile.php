@@ -149,9 +149,9 @@ $canSendDebtSms = \Sarva\Core\Auth::adminHasPermission('sms.send')
         <div class="col-md-4">
             <label class="form-label">مبلغ بدهی</label>
             <input type="text" name="debt_amount" class="form-control" dir="ltr"
-                   value="<?= e($debtAmount > 0 ? (string) (int) $debtAmount : '0') ?>"
-                   inputmode="numeric" autocomplete="off">
-            <div class="form-text">نمایش: <?= $debtAmount > 0 ? e(to_persian_digits((string) (int) $debtAmount)) : '۰' ?></div>
+                   value="<?= e($debtAmount > 0 ? format_amount_dots($debtAmount) : '0') ?>"
+                   inputmode="numeric" autocomplete="off" placeholder="1.000.000">
+            <div class="form-text">نمایش: <?= $debtAmount > 0 ? e(format_amount_dots($debtAmount)) : '0' ?></div>
         </div>
         <div class="col-md-8 d-flex flex-wrap gap-2">
             <button type="submit" class="btn btn-sm" style="background:#031D4F;color:#fff;border:0;">ذخیره مبلغ بدهی</button>
@@ -162,7 +162,7 @@ $canSendDebtSms = \Sarva\Core\Auth::adminHasPermission('sms.send')
         </div>
     </form>
     <?php else: ?>
-    <p style="margin:0;font-size:1.15rem;"><?= $debtAmount > 0 ? e(to_persian_digits((string) (int) $debtAmount)) : '۰' ?></p>
+    <p style="margin:0;font-size:1.15rem;" dir="ltr"><?= $debtAmount > 0 ? e(format_amount_dots($debtAmount)) : '0' ?></p>
     <?php endif; ?>
     <p style="margin:10px 0 0;color:#6b7280;font-size:.9rem;">
         آخرین پیامک بدهی:

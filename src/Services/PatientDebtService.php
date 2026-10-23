@@ -81,11 +81,12 @@ final class PatientDebtService
     public function parseDebtInput(mixed $raw): array
     {
         $str = trim(normalize_digits((string) $raw));
-        $str = str_replace([',', ' ', '٬', '،'], '', $str);
+        // Allow typed thousand separators (1.000.000 / 1,000,000) — debt is whole IRT.
+        $str = str_replace([',', ' ', '٬', '،', '.'], '', $str);
         if ($str === '') {
             return ['ok' => true, 'amount' => 0.0];
         }
-        if (!preg_match('/^\d+(\.\d+)?$/', $str)) {
+        if (!preg_match('/^\d+$/', $str)) {
             return ['ok' => false, 'message' => 'مبلغ بدهی باید یک عدد معتبر باشد.'];
         }
         $amount = (float) $str;
@@ -131,14 +132,16 @@ final class PatientDebtService
         ];
     }
 
-    /** Format numeric debt for display / SMS.ir #DEBT_AMOUNT# value. */
+    /** Format numeric debt for display / SMS.ir #DEBT_AMOUNT# (e.g. 1.000.000). */
     public static function formatDebtForSms(float|int|string $amount): string
     {
-        $n = (int) round((float) $amount);
-        if ($n < 0) {
-            $n = 0;
-        }
-        return to_persian_digits((string) $n);
+        return format_amount_dots($amount);
+    }
+
+    /** Same grouping for admin/patient UI. */
+    public static function formatDebtDisplay(float|int|string $amount): string
+    {
+        return format_amount_dots($amount);
     }
 
     public static function templateId(): int

@@ -529,6 +529,18 @@ function to_persian_digits(string|int|float $value): string
     ]);
 }
 
+/**
+ * Format a whole-number amount with "." as thousand separator (e.g. 1000000 → 1.000.000).
+ */
+function format_amount_dots(int|float|string $amount): string
+{
+    $n = (int) round((float) $amount);
+    if ($n < 0) {
+        $n = 0;
+    }
+    return number_format($n, 0, '', '.');
+}
+
 /** Normalize Persian text (ي→ی، ك→ک, collapse spaces). */
 function normalize_persian_text(string $value): string
 {

@@ -117,7 +117,7 @@ $total = (int) ($total ?? 0);
                         <td><a href="<?= url('/admin/patients/' . (int) $item['id']) ?>"><?= e($name !== '' ? $name : '—') ?></a></td>
                         <td dir="ltr"><?= e($item['mobile'] ?? '—') ?></td>
                         <td><?= e($item['national_id'] ?? '—') ?></td>
-                        <td><?= $rowDebt > 0 ? e(to_persian_digits((string) (int) $rowDebt)) : '—' ?></td>
+                        <td dir="ltr"><?= $rowDebt > 0 ? e(format_amount_dots($rowDebt)) : '—' ?></td>
                         <td><?= e(to_jalali($item['last_visit_at'] ?? $item['last_appointment'] ?? null, 'Y/m/d')) ?></td>
                         <td><?= e(to_jalali($item['next_appointment'] ?? null, 'Y/m/d H:i')) ?></td>
                         <td><?= (int) ($item['visit_count'] ?? 0) ?></td>

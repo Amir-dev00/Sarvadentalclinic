@@ -41,20 +41,22 @@ putenv('SMS_DRIVER=log');
 putenv('SMSIR_DEBT_REMINDER_TEMPLATE_ID=999001');
 
 assert_eq('template id mapping', 999001, SmsService::smsIrTemplateIdForMessageType('debt_reminder'));
-assert_eq('persian digits for 123456789', '۱۲۳۴۵۶۷۸۹', PatientDebtService::formatDebtForSms(123456789));
-assert_eq('format zero', '۰', PatientDebtService::formatDebtForSms(0));
+assert_eq('dotted thousands for 1000000', '1.000.000', PatientDebtService::formatDebtForSms(1000000));
+assert_eq('dotted thousands for 123456789', '123.456.789', PatientDebtService::formatDebtForSms(123456789));
+assert_eq('format zero', '0', PatientDebtService::formatDebtForSms(0));
+assert_eq('helper matches SMS format', '1.000.000', format_amount_dots(1000000));
 
-$preview = PatientDebtService::renderPreview(PatientDebtService::formatDebtForSms(123456789));
+$preview = PatientDebtService::renderPreview(PatientDebtService::formatDebtForSms(1000000));
 assert_true('preview contains clinic header', str_contains($preview, 'کلینیک دندانپزشکی سروا (دکتر زمان زاده)'));
-assert_true('preview contains debt line', str_contains($preview, 'مبلغ بدهی : ۱۲۳۴۵۶۷۸۹'));
+assert_true('preview contains debt line', str_contains($preview, 'مبلغ بدهی : 1.000.000'));
 assert_true('preview has no raw token', !str_contains($preview, '#DEBT_AMOUNT#'));
 assert_true('pattern constant uses #DEBT_AMOUNT#', str_contains(PatientDebtService::PATTERN_TEXT, '#DEBT_AMOUNT#'));
 assert_true('pattern has no markdown bold', !str_contains(PatientDebtService::PATTERN_TEXT, '**'));
 
-$params = ['DEBT_AMOUNT' => PatientDebtService::formatDebtForSms(123456789)];
+$params = ['DEBT_AMOUNT' => PatientDebtService::formatDebtForSms(1000000)];
 $list = SmsTemplateRenderer::toSmsIrParameterList($params);
 assert_eq('API param name is DEBT_AMOUNT without hashes', 'DEBT_AMOUNT', $list[0]['name'] ?? null);
-assert_eq('API param value is Persian digits', '۱۲۳۴۵۶۷۸۹', $list[0]['value'] ?? null);
+assert_eq('API param value uses dotted thousands', '1.000.000', $list[0]['value'] ?? null);
 assert_true('missing DEBT_AMOUNT detected', SmsTemplateRenderer::missingSmsIrParameters([], ['DEBT_AMOUNT']) === ['DEBT_AMOUNT']);
 
 $svcSrc = file_get_contents($root . '/src/Services/PatientDebtService.php') ?: '';
@@ -95,6 +97,9 @@ assert_true('negative debt rejected', empty($neg['ok']));
 /** @var array{ok:bool,amount?:float} $persian */
 $persian = $ref->invoke($parsedOk, '۱۲۳۴۵۶۷۸۹');
 assert_true('persian digit input accepted', !empty($persian['ok']) && (float) ($persian['amount'] ?? 0) === 123456789.0);
+/** @var array{ok:bool,amount?:float} $dotted */
+$dotted = $ref->invoke($parsedOk, '1.000.000');
+assert_true('dotted input accepted as 1000000', !empty($dotted['ok']) && (float) ($dotted['amount'] ?? 0) === 1000000.0);
 /** @var array{ok:bool,amount?:float} $zero */
 $zero = $ref->invoke($parsedOk, '0');
 assert_true('zero debt accepted', !empty($zero['ok']) && (float) ($zero['amount'] ?? -1) === 0.0);
