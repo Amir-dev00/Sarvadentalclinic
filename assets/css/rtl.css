@@ -684,6 +684,100 @@ input[inputmode="numeric"],
   color: #031D4F;
 }
 .admin-badge--ok { background: #e8f8f3; color: #067a5f; }
+/* Patient dossier header actions */
+.admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.admin-actions__form {
+  display: inline;
+  margin: 0;
+}
+.admin-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 8px 16px;
+  border-radius: 12px;
+  border: 1px solid #e5eaf2;
+  background: #fff;
+  color: #031D4F;
+  font-family: inherit;
+  font-size: .88rem;
+  font-weight: 600;
+  line-height: 1.2;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(3, 29, 79, 0.04);
+  transition: background .18s ease, border-color .18s ease, color .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+.admin-action:hover {
+  border-color: #05B18B66;
+  background: #f0fbf7;
+  color: #031D4F;
+  text-decoration: none;
+  box-shadow: 0 4px 12px rgba(5, 177, 139, 0.12);
+  transform: translateY(-1px);
+}
+.admin-action--primary {
+  background: #05B18B;
+  border-color: #05B18B;
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(5, 177, 139, 0.28);
+}
+.admin-action--primary:hover {
+  background: #049a78;
+  border-color: #049a78;
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(5, 177, 139, 0.34);
+}
+.admin-action--navy {
+  background: #031D4F;
+  border-color: #031D4F;
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(3, 29, 79, 0.22);
+}
+.admin-action--navy:hover {
+  background: #04265f;
+  border-color: #04265f;
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(3, 29, 79, 0.28);
+}
+.admin-action--soft {
+  background: #e8f8f3;
+  border-color: #b7ebd9;
+  color: #067a5f;
+}
+.admin-action--soft:hover {
+  background: #d8f3ea;
+  border-color: #05B18B;
+  color: #045c47;
+}
+.admin-action--success {
+  background: #e8f8f3;
+  border-color: #05B18B;
+  color: #067a5f;
+}
+.admin-action--success:hover {
+  background: #05B18B;
+  color: #fff;
+}
+.admin-action--danger {
+  background: #fff5f5;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+.admin-action--danger:hover {
+  background: #fee2e2;
+  border-color: #f87171;
+  color: #991b1b;
+}
+
 .admin-tabs {
   display: flex;
   flex-wrap: wrap;

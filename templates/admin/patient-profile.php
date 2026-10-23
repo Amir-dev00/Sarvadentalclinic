@@ -77,22 +77,22 @@ $canPlans = \Sarva\Core\Auth::adminHasPermission('patient_treatment_plans.view')
                 <?php if (!empty($patient['is_imported'])): ?> · <span class="admin-badge">Excel</span><?php endif; ?>
             </p>
         </div>
-        <div class="d-flex gap-2 flex-wrap">
-            <a class="btn btn-sm btn-outline-primary" href="<?= url('/admin/patients/' . $id . '/edit') ?>">ویرایش</a>
+        <div class="admin-actions">
             <?php if ($canVisit): ?>
-            <a class="btn btn-sm" style="background:#05B18B;color:#fff;border:0;" href="<?= url('/admin/patients/' . $id . '?tab=visits&new=1') ?>">ثبت جلسه جدید</a>
+            <a class="admin-action admin-action--primary" href="<?= url('/admin/patients/' . $id . '?tab=visits&new=1') ?>">ثبت جلسه جدید</a>
             <?php endif; ?>
-            <a class="btn btn-sm btn-outline-success" href="<?= url('/admin/sms/send?preset=selected&patient_ids[]=' . $id) ?>">ارسال پیامک</a>
-            <a class="btn btn-sm btn-outline-secondary" href="<?= url('/admin/appointments?patient_id=' . $id) ?>">ثبت نوبت</a>
+            <a class="admin-action admin-action--navy" href="<?= url('/admin/patients/' . $id . '/edit') ?>">ویرایش</a>
+            <a class="admin-action admin-action--soft" href="<?= url('/admin/sms/send?preset=selected&patient_ids[]=' . $id) ?>">ارسال پیامک</a>
+            <a class="admin-action admin-action--soft" href="<?= url('/admin/appointments?patient_id=' . $id) ?>">ثبت نوبت</a>
             <?php if (empty($patient['deleted_at'])): ?>
-            <form method="post" action="<?= url('/admin/patients/' . $id . '/archive') ?>" onsubmit="return confirm('بایگانی این بیمار؟');">
+            <form method="post" action="<?= url('/admin/patients/' . $id . '/archive') ?>" class="admin-actions__form" onsubmit="return confirm('بایگانی این بیمار؟');">
                 <?= csrf_field() ?>
-                <button class="btn btn-sm btn-outline-danger">آرشیو</button>
+                <button type="submit" class="admin-action admin-action--danger">آرشیو</button>
             </form>
             <?php else: ?>
-            <form method="post" action="<?= url('/admin/patients/' . $id . '/restore') ?>">
+            <form method="post" action="<?= url('/admin/patients/' . $id . '/restore') ?>" class="admin-actions__form">
                 <?= csrf_field() ?>
-                <button class="btn btn-sm btn-outline-success">بازیابی</button>
+                <button type="submit" class="admin-action admin-action--success">بازیابی</button>
             </form>
             <?php endif; ?>
         </div>
