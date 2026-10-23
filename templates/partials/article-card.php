@@ -10,7 +10,7 @@ if ($reading <= 0 && !empty($post['content'])) {
 <article class="article-card wow fadeInUp">
     <a href="<?= e($href) ?>" class="article-card-media" data-cursor-text="مطالعه">
         <figure class="image-anime">
-            <img src="<?= media_url($post['cover'] ?: 'images/post-1.jpg') ?>" alt="<?= e($post['title'] ?? '') ?>" loading="lazy" decoding="async" width="640" height="420">
+            <img src="<?= media_url($post['cover'] ?: 'images/post-1.jpg') ?>" alt="<?= e($post['title'] ?? '') ?>" loading="lazy">
         </figure>
     </a>
     <div class="article-card-body">

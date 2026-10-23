@@ -1204,11 +1204,11 @@ header.main-header .header-sticky.active{
 	margin-bottom: 10px;
 }
 
-.service-item-title h2, .service-item-title h3{
+.service-item-title h2{
 	font-size: 20px;
 }
 
-.service-item-title h2 a, .service-item-title h3 a{
+.service-item-title h2 a{
 	color: inherit;
 }
 
@@ -1699,7 +1699,7 @@ header.main-header .header-sticky.active{
 	text-align: center;
 }
 
-.team-item-content h2, .team-item-content h3{
+.team-item-content h2{
 	font-size: 1.15rem;
 	font-weight: 700;
 	line-height: 1.45;
@@ -1707,12 +1707,12 @@ header.main-header .header-sticky.active{
 	color: var(--primary-color);
 }
 
-.team-item-content h2 a, .team-item-content h3 a{
+.team-item-content h2 a{
 	color: inherit;
 	transition: color 0.3s ease;
 }
 
-.team-item-content h2 a:hover, .team-item-content h3 a:hover{
+.team-item-content h2 a:hover{
 	color: var(--accent-color);
 }
 
@@ -2516,7 +2516,7 @@ header.main-header .header-sticky.active{
 	margin-bottom: 0;
 }
 
-.footer-opening-hours h2, .footer-opening-hours h3{
+.footer-opening-hours h2{
 	font-size: 20px;
 	color: var(--white-color);
 }
@@ -2549,7 +2549,7 @@ header.main-header .header-sticky.active{
 	max-width: 30%;
 }
 
-.footer-links h2, .footer-links h3{
+.footer-links h2{
 	font-size: 20px;
 	color: var(--white-color);
 	margin-bottom: 30px;
@@ -4762,7 +4762,7 @@ header.main-header .header-sticky.active{
 		margin: 0;
 	}
 
-	.footer-links h2, .footer-links h3{
+	.footer-links h2{
 		margin-bottom: 20px;
 	}
 	
@@ -5742,7 +5742,7 @@ header.main-header .header-sticky.active{
 		margin-bottom: 15px;
 	}
 
-	.service-item-title h2, .service-item-title h3{
+	.service-item-title h2{
 		font-size: 18px;
 	}
 
@@ -5791,7 +5791,7 @@ header.main-header .header-sticky.active{
         font-size: 16px;
     }
 
-	.team-item-content h2, .team-item-content h3{
+	.team-item-content h2{
 		font-size: 18px;
 	}
 
@@ -5903,7 +5903,7 @@ header.main-header .header-sticky.active{
         font-size: 24px;
     }
 
-	.footer-opening-hours h2, .footer-opening-hours h3{
+	.footer-opening-hours h2{
 		font-size: 18px;
 	}
 
@@ -5911,7 +5911,7 @@ header.main-header .header-sticky.active{
 		max-width: 100%;
 	}
 
-	.footer-links h2, .footer-links h3{
+	.footer-links h2{
 		font-size: 18px;
         margin-bottom: 15px;
     }

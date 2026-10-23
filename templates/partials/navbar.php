@@ -29,7 +29,7 @@ if (!$menuItems) {
             <div class="container">
                 <div class="navbar-brand-block">
                     <a class="navbar-brand" href="<?= url('/') ?>">
-                        <img src="<?= media_url(setting('logo_path', 'images/logo.svg')) ?>?v=3" alt="<?= e($clinicName) ?>" width="180" height="48" decoding="async">
+                        <img src="<?= media_url(setting('logo_path', 'images/logo.svg')) ?>?v=3" alt="<?= e($clinicName) ?>">
                     </a>
                     <p class="clinic-legacy-name clinic-legacy-name--header">(دکتر سید حسن زمان‌زاده)</p>
                 </div>
@@ -50,7 +50,7 @@ if (!$menuItems) {
                                 </li>
                             <?php endforeach; ?>
                             <li class="nav-item submenu">
-                                <a class="nav-link" href="<?= url('/case-studies') ?>" aria-haspopup="true" aria-expanded="false">صفحات</a>
+                                <a class="nav-link" href="#">صفحات</a>
                                 <ul>
                                     <li class="nav-item"><a class="nav-link" href="<?= url('/case-studies') ?>">نمونه کارها</a></li>
                                     <li class="nav-item"><a class="nav-link" href="<?= url('/testimonials') ?>">نظرات بیماران</a></li>
@@ -73,7 +73,7 @@ if (!$menuItems) {
                         <a href="<?= booking_url() ?>" class="btn-default">رزرو نوبت</a>
                     </div>
                 </div>
-                <div class="navbar-toggle" aria-hidden="true"></div>
+                <div class="navbar-toggle"></div>
             </div>
         </nav>
         <div class="responsive-menu"></div>

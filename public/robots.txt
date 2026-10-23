@@ -5,4 +5,4 @@ Disallow: /patient
 Disallow: /api
 Disallow: /storage
 
-Sitemap: https://sarvadentalclinic.ir/sitemap.php
+Sitemap: /sitemap.php

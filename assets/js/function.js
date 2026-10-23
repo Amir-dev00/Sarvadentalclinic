@@ -4,16 +4,10 @@
 	var $window = $(window); 
 	var $body = $('body'); 
 
-	/* Preloader Effect — hide on load, with a hard timeout so LCP is not blocked forever */
-	var hidePreloader = function () {
-		var $pre = $(".preloader");
-		if (!$pre.length || $pre.data('hidden')) {
-			return;
-		}
-		$pre.data('hidden', true).fadeOut(400);
-	};
-	$window.on('load', hidePreloader);
-	setTimeout(hidePreloader, 1200);
+	/* Preloader Effect */
+	$window.on('load', function(){
+		$(".preloader").fadeOut(600);
+	});
 
 	/* Sticky Header */	
 	if($('.active-sticky-header').length){
@@ -36,7 +30,7 @@
 	
 	/* Slick Menu JS */
 	$('#menu').slicknav({
-		label : 'منو',
+		label : '',
 		prependTo : '.responsive-menu'
 	});
 
