@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5">
+    <meta name="google-site-verification" content="Dn1_wOUr7-Ojh72hy0SrNWLwUT-VD_30kfe8-lvRa40">
     <meta name="description" content="<?= e($metaDescription ?? setting('clinic_name', 'کلینیک دندانپزشکی سروا')) ?>">
     <?php if (!empty($robotsMeta)): ?>
     <meta name="robots" content="<?= e($robotsMeta) ?>">
